@@ -22,85 +22,61 @@ okdoit은 목표를 달성할 때까지 아래 4단계 루프를 반복합니다
 └─────────────────────────────────────────────────────┘
 ```
 
-| 단계 | 설명 |
-|------|------|
-| Observe (관찰)| 현재 웹페이지의 스크린샷과 텍스트 트리(DOM)를 분석합니다 |
-| Think (사고)| 목표 달성을 위해 현재 페이지에서 무엇을 해야 할지 판단합니다 |
-| Act (행동) | Playwright를 통해 실제 브라우저 조작 명령을 실행합니다 |
-|  Verify (검증) | 행동의 결과가 의도대로 되었는지 확인하고 다음 단계로 넘어갑니다 |
+| 단계 | 파일 | 설명 |
+|------|------|------|
+| Observe (관찰) | `core/nodes/observe.py` | 스크린샷 촬영, DOM 텍스트 추출, 현재 URL 수집 |
+| Think (사고) | `core/nodes/think.py` | 스크린샷 + DOM을 LLM에 전달해 다음 액션 결정 |
+| Act (행동) | `core/nodes/act.py` | navigate / click / type / scroll / wait 실행 |
+| Verify (검증) | `core/nodes/verify.py` | 종료 조건 판단 (목표 달성 / 에러 / 최대 반복 초과) |
 
 ---
 
 ## 기술 스택
 
-### Core
-
 | 역할 | 기술 |
 |------|------|
-| 언어 | Python 3.11+ |
+| 언어 | Python 3.12 |
 | 브라우저 자동화 | [Playwright](https://playwright.dev/python/) |
-| AI / LLM | 미정 (OpenAI GPT-4o / Anthropic Claude 등) |
+| LLM | Anthropic Claude / Ollama (로컬) |
 | 오케스트레이션 | [LangGraph](https://github.com/langchain-ai/langgraph) |
-| API 서버 (선택) | [FastAPI](https://fastapi.tiangolo.com/) |
-
-### Why LangGraph?
-
-The Loop 구조(관찰 → 사고 → 행동 → 검증)는 **상태 기반 사이클 그래프**로 표현됩니다. LangGraph는 이 구조를 명시적으로 정의하고, 조건 분기·루프·상태 관리를 깔끔하게 처리할 수 있어 선택했습니다.
-
-> LangChain은 선형 체인에 적합하고, LangGraph는 순환/분기가 필요한 에이전트 루프에 적합합니다.
+| LLM 추상화 | LangChain (`langchain-anthropic`, `langchain-ollama`) |
 
 ---
 
-## CLI 사용 예시
-
-```bash
-$ python agent.py --task "내일 물때표 확인해줘"
-
-[Thought]      먼저 구글에서 '내일 부산 물때표'를 검색해야 합니다.
-[Action]       Navigate to https://google.com
-[Action]       Type "내일 부산 물때표" into search bar and press Enter
-[Observation]  검색 결과 페이지가 로드되었습니다. '바다타임' 사이트가 보입니다.
-[Thought]      가장 신뢰도가 높은 '바다타임' 링크를 클릭하겠습니다.
-[Action]       Click on "부산 물때표, 부산 조석예보 - 바다타임"
-[Observation]  바다타임 페이지가 로드되었습니다. 내일 날짜의 물때 정보가 보입니다.
-[Verify]       목표 정보(내일 물때)가 화면에 존재합니다. 추출을 시작합니다.
-[Success]      내일 부산 물때는 4물이며, 만조 시각은 06:32 / 18:47 입니다.
-```
-
----
-
-## 프로젝트 구조 (예정)
+## 프로젝트 구조
 
 ```
 okdoit/
-├── agent.py              # CLI 진입점
+├── agent.py                  # CLI 진입점
 ├── core/
-│   ├── graph.py          # LangGraph 상태 그래프 정의
-│   ├── nodes/
-│   │   ├── observe.py    # 관찰 노드 (스크린샷, DOM 파싱)
-│   │   ├── think.py      # 사고 노드 (LLM 호출)
-│   │   ├── act.py        # 행동 노드 (Playwright 조작)
-│   │   └── verify.py     # 검증 노드
-│   └── browser.py        # Playwright 브라우저 관리
-├── api/
-│   └── server.py         # FastAPI 서버 (선택적)
-├── prompts/
-│   └── agent.md          # 시스템 프롬프트
-├── requirements.txt
-└── README.md
+│   ├── state.py              # AgentState TypedDict 정의
+│   ├── graph.py              # LangGraph StateGraph 정의
+│   ├── browser.py            # Playwright BrowserManager (싱글톤)
+│   ├── llm/
+│   │   ├── base.py           # BaseLLMProvider 추상 클래스
+│   │   ├── anthropic.py      # Anthropic Claude 프로바이더
+│   │   ├── ollama.py         # Ollama 로컬 프로바이더
+│   │   └── factory.py        # LLM_PROVIDER 환경변수로 프로바이더 선택
+│   └── nodes/
+│       ├── observe.py        # 관찰 노드
+│       ├── think.py          # 사고 노드
+│       ├── act.py            # 행동 노드
+│       └── verify.py         # 검증 노드
+├── prompt/
+│   └── agent.md              # LLM 시스템 프롬프트
+├── tests/
+│   ├── test_browser.py
+│   ├── test_observe.py
+│   ├── test_think.py
+│   ├── test_act.py
+│   ├── test_verify.py
+│   ├── test_graph.py
+│   ├── test_agent.py
+│   └── test_ollama_integration.py
+├── .env.example
+├── pytest.ini
+└── requirements.txt
 ```
-
----
-
-## 로드맵
-
-- [ ] 기본 The Loop 구현 (LangGraph)
-- [ ] Playwright 브라우저 제어 연동
-- [ ] CLI 인터페이스 구현
-- [ ] 스크린샷 기반 관찰 기능
-- [ ] DOM 텍스트 트리 파싱
-- [ ] FastAPI 서버 래핑
-- [ ] 작업 히스토리 저장 및 재실행
 
 ---
 
@@ -117,8 +93,82 @@ pip install -r requirements.txt
 # Playwright 브라우저 설치
 playwright install chromium
 
-# 실행
-python agent.py --task "원하는 작업을 입력하세요"
+# 환경변수 설정
+cp .env.example .env
+# .env 파일을 열어 값 입력
+```
+
+### 환경변수 설정 (`.env`)
+
+```env
+# LLM 프로바이더 선택: anthropic | ollama
+LLM_PROVIDER=anthropic
+
+# LLM 모델명
+LLM_MODEL=claude-sonnet-4-6
+
+# Anthropic API 키 (LLM_PROVIDER=anthropic 일 때 필수)
+ANTHROPIC_API_KEY=your-api-key-here
+
+# Ollama 서버 주소 (LLM_PROVIDER=ollama 일 때, 기본값: http://localhost:11434)
+# OLLAMA_BASE_URL=http://localhost:11434
+
+# 브라우저 헤드리스 모드 (기본값: true)
+# BROWSER_HEADLESS=false
+```
+---
+
+## CLI 사용법
+
+```bash
+# 기본 실행 (headless 모드)
+python agent.py --task "내일 서울 날씨 알려줘"
+
+# 브라우저 창 표시
+python agent.py --task "내일 서울 날씨 알려줘" --no-headless
+```
+
+### 출력 예시
+
+```
+[태스크] example.com 페이지 제목을 알려줘
+────────────────────────────────────────────────────────────
+[Observation]
+[Thought]      현재 페이지가 비어있다. example.com으로 이동해야 한다.
+[Action]       https://example.com으로 이동
+[Verify]       반복 1회 / 최대 20회
+[Observation]  Example Domain This domain is for use in illustrative examples...
+[Thought]      페이지 제목은 'Example Domain'임을 확인했다. 목표를 달성했다.
+[Verify]       반복 2회 / 최대 20회
+────────────────────────────────────────────────────────────
+[Success]      페이지의 제목은 'Example Domain'입니다.
 ```
 
 ---
+
+## 테스트
+
+```bash
+# 단위 테스트 전체 실행
+pytest tests/ -v -m "not integration"
+
+# 통합 테스트 (Ollama 서버 필요)
+pytest tests/ -v -m integration
+
+# 특정 파일만 실행
+pytest tests/test_graph.py -v
+```
+
+---
+
+## 로드맵
+
+- [x] 기본 The Loop 구현 (LangGraph)
+- [x] Playwright 브라우저 제어 연동
+- [x] CLI 인터페이스 구현
+- [x] 스크린샷 기반 관찰 기능
+- [x] DOM 텍스트 트리 파싱
+- [x] Anthropic / Ollama 멀티 프로바이더 지원
+- [ ] `<title>` 태그 추출 개선
+- [ ] FastAPI 서버 래핑
+- [ ] 작업 히스토리 저장 및 재실행
