@@ -3,10 +3,12 @@ import os
 from langchain_core.language_models import BaseChatModel
 
 from core.llm.anthropic import AnthropicProvider
+from core.llm.gemini import GeminiProvider
 from core.llm.ollama import OllamaProvider
 
 _PROVIDERS = {
     "anthropic": AnthropicProvider,
+    "gemini": GeminiProvider,
     "ollama": OllamaProvider,
 }
 
