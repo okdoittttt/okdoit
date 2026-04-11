@@ -153,6 +153,11 @@ async def _type(page: Page, target: str, text: str) -> None:
     for locator in [
         page.get_by_placeholder(target),
         page.get_by_label(target),
+        page.get_by_role("searchbox"),
+        page.get_by_role("textbox"),
+        page.locator("input[type='search']"),
+        page.locator("input[name='q']"),
+        page.locator("textarea[name='q']"),
         page.locator(target),
     ]:
         try:
