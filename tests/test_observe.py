@@ -1,0 +1,121 @@
+import os
+import pytest
+import pytest_asyncio
+from core.browser import BrowserManager
+from core.nodes.observe import observe
+from core.state import AgentState
+
+
+def make_state(**kwargs) -> AgentState:
+    """테스트용 기본 AgentState를 생성한다.
+
+    Args:
+        **kwargs: 기본값을 덮어쓸 AgentState 필드.
+
+    Returns:
+        테스트용 AgentState.
+    """
+    base: AgentState = {
+        "task": "테스트 태스크",
+        "messages": [],
+        "current_url": "",
+        "screenshot_path": None,
+        "dom_text": None,
+        "last_action": None,
+        "is_done": False,
+        "result": None,
+        "error": None,
+        "iterations": 0,
+    }
+    return {**base, **kwargs}
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_singleton():
+    """각 테스트 전후로 싱글톤 인스턴스를 초기화한다."""
+    BrowserManager._instance = None
+    yield
+    if BrowserManager._instance is not None:
+        await BrowserManager._instance.stop()
+
+
+@pytest.mark.asyncio
+async def test_observe_without_browser_returns_error():
+    """브라우저 시작 없이 observe 호출 시 error 필드에 메시지가 기록되는지 확인한다."""
+    state = make_state()
+    result = await observe(state)
+    assert result["error"] is not None
+    assert "[observe]" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_observe_updates_screenshot_path(tmp_path):
+    """observe 호출 후 screenshot_path가 업데이트되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state(iterations=1)
+    result = await observe(state)
+
+    assert result["screenshot_path"] is not None
+    assert os.path.exists(result["screenshot_path"])
+    assert "step_1.png" in result["screenshot_path"]
+
+
+@pytest.mark.asyncio
+async def test_observe_updates_current_url(tmp_path):
+    """observe 호출 후 current_url이 업데이트되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state()
+    result = await observe(state)
+
+    assert result["current_url"] == "https://example.com/"
+
+
+@pytest.mark.asyncio
+async def test_observe_updates_dom_text(tmp_path):
+    """observe 호출 후 dom_text가 추출되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state()
+    result = await observe(state)
+
+    assert result["dom_text"] is not None
+    assert len(result["dom_text"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_observe_clears_previous_error(tmp_path):
+    """이전 error가 있던 state에서 observe 성공 시 error가 None으로 초기화되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state(error="이전 에러 메시지")
+    result = await observe(state)
+
+    assert result["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_observe_screenshot_filename_matches_iterations(tmp_path):
+    """스크린샷 파일명이 iterations 값을 반영하는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state(iterations=5)
+    result = await observe(state)
+
+    assert "step_5.png" in result["screenshot_path"]
