@@ -12,6 +12,7 @@ langchain-ollama>=0.2.0
 
 # ── Browser Automation ────────────────────────
 playwright>=1.44.0
+playwright-stealth>=2.0.0
 
 # ── Environment & Config ──────────────────────
 python-dotenv>=1.0.0
