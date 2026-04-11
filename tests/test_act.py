@@ -173,6 +173,14 @@ async def test_act_clears_error_on_success():
     assert result["error"] is None
 
 
+@pytest.mark.asyncio
+async def test_act_skips_when_is_done():
+    """is_done=True면 액션을 실행하지 않고 state를 그대로 반환하는지 확인한다."""
+    result = await act(make_state(is_done=True, last_action="없음"))
+    assert result["is_done"] is True
+    assert result["error"] is None
+
+
 # ── act() 통합 테스트 ──────────────────────────────────────────────────────────
 
 @pytest.mark.integration
