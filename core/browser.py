@@ -3,6 +3,8 @@ from typing import Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
+_headless_default = os.environ.get("BROWSER_HEADLESS", "true").lower() != "false"
+
 
 class BrowserManager:
     """Playwright 브라우저 싱글톤 관리자
@@ -32,7 +34,7 @@ class BrowserManager:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self, headless: bool = True, screenshot_dir: str = ".screenshots") -> None:
+    def __init__(self, headless: bool = _headless_default, screenshot_dir: str = ".screenshots") -> None:
         """BrowserManager를 초기화한다.
 
         Args:
