@@ -25,7 +25,7 @@ async def think(state: AgentState) -> AgentState:
         에러 발생 시 error 필드에 메시지를 기록하고 반환한다.
     """
     try:
-        llm = _build_llm()
+        llm = build_llm()
         messages = _build_messages(state)
         response = await llm.ainvoke(messages)
         response_text = response.content if isinstance(response.content, str) else str(response.content)
