@@ -22,7 +22,7 @@ async def act(state: AgentState) -> AgentState:
         에러 발생 시 error 필드에 메시지를 기록하고 반환한다.
     """
     if state["is_done"]:
-        return state
+        return {**state, "iterations": state["iterations"] + 1}
 
     try:
         manager = BrowserManager()

@@ -84,7 +84,8 @@ def _print_step(node_name: str, state: AgentState) -> None:
             except (json.JSONDecodeError, AttributeError):
                 pass
         print(f"[Thought]      {thought}")
-        print(f"[Action]       {state.get('last_action', '')}")
+        if not state.get("is_done"):
+            print(f"[Action]       {state.get('last_action', '')}")
 
     elif node_name == "observe":
         dom = state.get("dom_text") or ""
