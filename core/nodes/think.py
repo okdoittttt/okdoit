@@ -37,7 +37,7 @@ async def think(state: AgentState) -> AgentState:
         return {
             **state,
             "messages": list(state["messages"]) + [response],
-            "last_action": parsed["action"],
+            "last_action": json.dumps(parsed["action"], ensure_ascii=False),
             "is_done": parsed["is_done"],
             "result": parsed.get("result"),
             "error": None,
@@ -104,5 +104,8 @@ def _parse_response(response: str) -> dict:
 
     if parsed.get("is_done") and parsed.get("result") is None:
         return {"error": "[think] is_done이 true이면 result가 있어야 합니다."}
+
+    if not isinstance(parsed.get("action"), dict):
+        return {"error": "[think] action 필드가 객체가 아닙니다."}
 
     return parsed

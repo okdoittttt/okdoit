@@ -2,6 +2,7 @@ import os
 from typing import Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+from playwright_stealth import Stealth
 
 _headless_default = os.environ.get("BROWSER_HEADLESS", "true").lower() != "false"
 
@@ -57,9 +58,21 @@ class BrowserManager:
         Playwright를 시작하고 Chromium 브라우저와 새 컨텍스트, 페이지를 생성한다.
         """
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
-        self._context = await self._browser.new_context()
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        self._context = await self._browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            locale="ko-KR",
+        )
         self._page = await self._context.new_page()
+        await Stealth().apply_stealth_async(self._page)
     
     async def stop(self) -> None:
         """브라우저를 종료한다.

@@ -31,14 +31,15 @@ def make_state(**kwargs) -> AgentState:
 
 def test_parse_response_valid():
     """올바른 JSON 응답을 파싱한다."""
+    action = {"type": "click", "value": "로그인 버튼"}
     raw = json.dumps({
         "thought": "페이지를 확인했다",
-        "action": "로그인 버튼 클릭",
+        "action": action,
         "is_done": False,
         "result": None,
     })
     parsed = _parse_response(raw)
-    assert parsed["action"] == "로그인 버튼 클릭"
+    assert parsed["action"] == action
     assert parsed["is_done"] is False
     assert "error" not in parsed
 
@@ -54,7 +55,7 @@ def test_parse_response_is_done_without_result():
     """is_done=True인데 result가 없으면 error를 반환한다."""
     raw = json.dumps({
         "thought": "완료",
-        "action": "없음",
+        "action": {"type": "wait", "value": 0},
         "is_done": True,
         "result": None,
     })
@@ -66,7 +67,7 @@ def test_parse_response_is_done_with_result():
     """is_done=True이고 result가 있으면 정상 파싱한다."""
     raw = json.dumps({
         "thought": "완료",
-        "action": "없음",
+        "action": {"type": "wait", "value": 0},
         "is_done": True,
         "result": "최종 결과입니다.",
     })
@@ -144,17 +145,18 @@ def _make_llm_mock(response_json: dict) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_think_updates_last_action():
-    """LLM 응답의 action이 last_action에 저장되는지 확인한다."""
+    """LLM 응답의 action dict가 JSON 문자열로 last_action에 저장되는지 확인한다."""
+    action = {"type": "click", "value": "로그인 버튼"}
     mock_llm = _make_llm_mock({
         "thought": "버튼을 클릭해야 한다",
-        "action": "로그인 버튼 클릭",
+        "action": action,
         "is_done": False,
         "result": None,
     })
     with patch("core.nodes.think.build_llm", return_value=mock_llm):
         result = await think(make_state())
 
-    assert result["last_action"] == "로그인 버튼 클릭"
+    assert result["last_action"] == json.dumps(action, ensure_ascii=False)
     assert result["error"] is None
 
 
@@ -163,7 +165,7 @@ async def test_think_appends_to_messages():
     """LLM 응답이 messages 히스토리에 추가되는지 확인한다."""
     mock_llm = _make_llm_mock({
         "thought": "진행 중",
-        "action": "다음 페이지 이동",
+        "action": {"type": "navigate", "value": "https://example.com"},
         "is_done": False,
         "result": None,
     })
@@ -178,7 +180,7 @@ async def test_think_sets_is_done_and_result():
     """is_done=True일 때 result가 state에 저장되는지 확인한다."""
     mock_llm = _make_llm_mock({
         "thought": "목표 달성",
-        "action": "없음",
+        "action": {"type": "wait", "value": 0},
         "is_done": True,
         "result": "작업 완료됐습니다.",
     })

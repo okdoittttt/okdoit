@@ -1,4 +1,4 @@
-import re
+import json
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
@@ -44,43 +44,23 @@ async def act(state: AgentState) -> AgentState:
 
 
 def _parse_action(action: str) -> dict:
-    """last_action 문자열을 파싱해서 액션 타입과 파라미터를 추출한다.
+    """last_action JSON 문자열을 파싱해서 액션 딕셔너리를 반환한다.
 
     Args:
-        action: think 노드가 생성한 액션 문자열
+        action: think 노드가 json.dumps()로 직렬화한 액션 JSON 문자열
 
     Returns:
-        {"type": ..., "value": ...} 형태의 딕셔너리.
-        파싱 실패 시 {"error": "..."} 를 반환한다.
+        액션 딕셔너리. 파싱 실패 시 {"error": "..."} 를 반환한다.
     """
-    action = action.strip()
+    try:
+        parsed = json.loads(action)
+    except (json.JSONDecodeError, TypeError):
+        return {"error": f"[act] 액션 JSON 파싱 실패: '{action}'"}
 
-    # navigate: URL 패턴 탐지
-    url_match = re.search(r'https?://\S+', action)
-    if url_match:
-        return {"type": "navigate", "value": url_match.group(0).rstrip("으로이동 ")}
+    if "type" not in parsed:
+        return {"error": f"[act] 액션에 type 필드가 없습니다: '{action}'"}
 
-    # type: "X에 'Y' 입력" 또는 "X에 Y 입력"
-    type_match = re.search(r"(.+?)에\s+['\"]?(.+?)['\"]?\s*입력", action)
-    if type_match:
-        return {"type": "type", "target": type_match.group(1).strip(), "value": type_match.group(2).strip()}
-
-    # scroll: 방향 파싱
-    if "스크롤" in action or "scroll" in action.lower():
-        direction = "up" if ("위" in action or "up" in action.lower()) else "down"
-        return {"type": "scroll", "value": direction}
-
-    # wait: 숫자 + 초
-    wait_match = re.search(r"(\d+(?:\.\d+)?)\s*초", action)
-    if wait_match:
-        return {"type": "wait", "value": float(wait_match.group(1))}
-
-    # click: "X 클릭" 또는 "X 버튼 클릭"
-    click_match = re.search(r"(.+?)\s*클릭", action)
-    if click_match:
-        return {"type": "click", "value": click_match.group(1).strip()}
-
-    return {"error": f"[act] 액션을 파싱할 수 없습니다: '{action}'"}
+    return parsed
 
 
 async def _execute(page: Page, action: dict) -> None:

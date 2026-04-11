@@ -106,7 +106,7 @@ async def test_graph_runs_and_terminates_on_is_done(tmp_path):
     """LLM이 첫 턴에 is_done=True를 반환하면 한 번만 실행하고 종료하는지 확인한다."""
     mock_llm = _make_llm_mock({
         "thought": "목표 달성",
-        "action": "없음",
+        "action": {"type": "wait", "value": 0},
         "is_done": True,
         "result": "완료됐습니다.",
     })
@@ -154,7 +154,7 @@ async def test_graph_terminates_on_max_iterations(tmp_path):
     """MAX_LOOP_ITERATIONS를 초과하면 루프가 종료되는지 확인한다."""
     mock_llm = _make_llm_mock({
         "thought": "계속 진행",
-        "action": "https://example.com으로 이동",
+        "action": {"type": "navigate", "value": "https://example.com"},
         "is_done": False,
         "result": None,
     })
