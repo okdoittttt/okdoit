@@ -119,3 +119,77 @@ async def test_observe_screenshot_filename_matches_iterations(tmp_path):
     result = await observe(state)
 
     assert "step_5.png" in result["screenshot_path"]
+
+
+@pytest.mark.asyncio
+async def test_observe_dom_text_contains_page_info_sections(tmp_path):
+    """dom_text에 [Page Info], [Clickable Elements], [Page Content] 섹션이 포함되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state()
+    result = await observe(state)
+
+    dom_text = result["dom_text"]
+    assert "[Page Info]" in dom_text
+    assert "[Clickable Elements]" in dom_text
+    assert "[Page Content]" in dom_text
+    assert "Title:" in dom_text
+    assert "URL:" in dom_text
+
+
+@pytest.mark.asyncio
+async def test_observe_dom_text_includes_url(tmp_path):
+    """dom_text에 현재 URL이 포함되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state()
+    result = await observe(state)
+
+    assert "https://example.com/" in result["dom_text"]
+
+
+@pytest.mark.asyncio
+async def test_observe_dom_text_includes_page_title(tmp_path):
+    """dom_text에 페이지 title이 포함되는지 확인한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.goto("https://example.com")
+
+    state = make_state()
+    result = await observe(state)
+
+    # example.com의 title은 "Example Domain"
+    assert "Title:" in result["dom_text"]
+    assert len(result["dom_text"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_trim_text_function_handles_long_content():
+    """토큰 제한 로직이 긴 텍스트를 제대로 자르는지 확인한다."""
+    from core.nodes.observe import _trim_text
+
+    long_text = "A" * 10000
+    trimmed = _trim_text(long_text, max_chars=8000)
+
+    assert len(trimmed) <= 8100  # 약간의 여유 (중괄호, 마크 포함)
+    assert "...[중략]..." in trimmed
+    assert trimmed.startswith("A" * int(8000 * 0.6))
+
+
+@pytest.mark.asyncio
+async def test_trim_text_function_preserves_short_content():
+    """토큰 제한 로직이 짧은 텍스트는 그대로 유지하는지 확인한다."""
+    from core.nodes.observe import _trim_text
+
+    short_text = "Hello World"
+    trimmed = _trim_text(short_text, max_chars=8000)
+
+    assert trimmed == short_text
+    assert "...[중략]..." not in trimmed
