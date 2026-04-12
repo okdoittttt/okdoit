@@ -193,3 +193,38 @@ async def test_trim_text_function_preserves_short_content():
 
     assert trimmed == short_text
     assert "...[중략]..." not in trimmed
+
+
+@pytest.mark.asyncio
+async def test_observe_clickable_elements_deduplicates(tmp_path):
+    """클릭 가능한 요소가 중복으로 수집되지 않는지 확인한다.
+
+    예: <button onclick="submit()">제출</button>은 'button' 선택자와
+    '[onclick]' 선택자에 모두 매칭되지만, 한 번만 수집되어야 한다.
+    """
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+
+    # onclick 속성을 가진 button을 포함하는 HTML 페이지
+    html_content = """
+    <html>
+    <body>
+    <button onclick="alert('test')">Submit</button>
+    <input type="text" placeholder="Search">
+    <a href="/home">Home</a>
+    </body>
+    </html>
+    """
+    await page.set_content(html_content)
+
+    state = make_state()
+    result = await observe(state)
+
+    # dom_text에서 클릭 가능한 요소 섹션 추출
+    dom_text = result["dom_text"]
+    clickable_section = dom_text.split("[Page Content]")[0]
+
+    # Submit 버튼이 한 번만 나타나는지 확인 (중복 제거 검증)
+    submit_count = clickable_section.count("Submit")
+    assert submit_count == 1, f"Submit 버튼이 {submit_count}번 나타났습니다 (중복 발생)"

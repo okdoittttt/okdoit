@@ -112,6 +112,7 @@ async def _extract_clickable_elements(page: Page) -> list[dict[str, Any]]:
         elements: list[dict[str, Any]] = await page.evaluate("""() => {
             const MAX_ELEMENTS = """ + str(MAX_CLICKABLE_ELEMENTS) + """;
             const results = [];
+            const seen = new Set();
             const selectors = [
                 'button',
                 'a[href]',
@@ -131,6 +132,8 @@ async def _extract_clickable_elements(page: Page) -> list[dict[str, Any]]:
                 if (results.length >= MAX_ELEMENTS) break;
                 document.querySelectorAll(selector).forEach(el => {
                     if (results.length >= MAX_ELEMENTS) return;
+                    if (seen.has(el)) return;
+                    seen.add(el);
 
                     const rect = el.getBoundingClientRect();
                     const isVisible = rect.height > 0 && rect.width > 0 &&
