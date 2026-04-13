@@ -65,8 +65,8 @@ def test_register_overwrites_existing_handler(fresh_registry):
 
 @pytest.mark.asyncio
 async def test_global_registry_has_all_actions():
-    """전역 registry에 6개 기본 액션이 모두 등록되어 있는지 확인한다."""
+    """전역 registry에 7개 기본 액션이 모두 등록되어 있는지 확인한다."""
     from core.actions import registry
 
-    for action_type in ("navigate", "click", "type", "scroll", "wait", "press"):
+    for action_type in ("navigate", "click", "type", "scroll", "wait", "press", "back"):
         assert action_type in registry._handlers, f"{action_type} 미등록"
