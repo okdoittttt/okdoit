@@ -27,3 +27,16 @@ async def scroll(page: Page, action: dict) -> None:
     direction = action["value"]
     delta = 500 if direction == "down" else -500
     await page.evaluate(f"window.scrollBy(0, {delta})")
+
+
+@registry.register("back")
+async def back(page: Page, action: dict) -> None:
+    """이전 페이지로 돌아간다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "back"} 또는 {"type": "back", "count": <횟수>}
+    """
+    count = action.get("count", 1)
+    for _ in range(count):
+        await page.go_back(timeout=10_000)

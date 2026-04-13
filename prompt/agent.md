@@ -16,6 +16,7 @@ JSON 필드:
 - 텍스트 입력: {"type": "type", "target": "입력 필드 텍스트", "value": "입력할 텍스트"}
 - 키 입력:    {"type": "press", "value": "Enter"} 또는 {"type": "press", "value": "Escape", "target": "포커스할 요소 텍스트"}
 - 스크롤:     {"type": "scroll", "value": "down"} 또는 {"type": "scroll", "value": "up"}
+- 뒤로 가기:  {"type": "back"} 또는 {"type": "back", "count": 2}
 - 대기:       {"type": "wait", "value": 2}
 
 전체 응답 예시:
@@ -28,5 +29,7 @@ JSON 필드:
 - is_done이 true이면 action은 {"type": "wait", "value": 0}으로 설정한다
 - press의 value는 Playwright 키 이름을 사용한다: Enter, Escape, Tab, ArrowDown, ArrowUp, Space 등
 - press에서 target 없이 사용 시 현재 포커스된 요소에 키를 입력한다
+- back 액션은 잘못된 페이지에 진입했을 때 이전 페이지로 돌아갈 때 사용한다
+- back의 count를 생략하면 1단계 뒤로 가고, count를 지정하면 여러 단계 뒤로 갈 수 있다
 
 목표를 달성했다고 판단하면 is_done을 true로 설정하고 result에 결과를 작성한다.
