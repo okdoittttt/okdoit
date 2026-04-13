@@ -78,3 +78,40 @@ async def wait(page: Page, action: dict) -> None:
     """
     clamped = min(action["value"], _MAX_WAIT_SECONDS)
     await page.wait_for_timeout(clamped * 1_000)
+
+
+@registry.register("press")
+async def press(page: Page, action: dict) -> None:
+    """키보드 키를 누른다.
+
+    target이 없으면 현재 포커스된 요소에 키를 입력하고,
+    target이 있으면 해당 요소를 찾아 포커스 후 키를 입력한다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "press", "value": "<key>"}
+              또는 {"type": "press", "value": "<key>", "target": "<element>"}
+
+    Raises:
+        RuntimeError: target이 지정되었으나 요소를 찾을 수 없는 경우
+    """
+    key = action["value"]
+    target = action.get("target")
+    timeout = 10_000
+
+    if target is None:
+        await page.keyboard.press(key)
+        return
+
+    for locator in [
+        page.get_by_text(target, exact=False),
+        page.get_by_role("button", name=target),
+        page.locator(target),
+    ]:
+        try:
+            await locator.first.press(key, timeout=timeout)
+            return
+        except Exception:
+            continue
+
+    raise RuntimeError(f"키 입력할 요소를 찾을 수 없습니다: '{target}'")
