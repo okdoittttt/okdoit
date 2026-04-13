@@ -20,8 +20,9 @@ def pytest_configure(config):
 def set_ollama_env(monkeypatch):
     """Ollama 환경변수를 설정한다."""
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
-    monkeypatch.setenv("LLM_MODEL", os.environ.get("LLM_MODEL", "llama3.2"))
-    monkeypatch.setenv("OLLAMA_BASE_URL", os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"))
+    # Ollama 서버에 실제로 설치된 모델로 설정 (llama3.2가 아닌 경우 gemma4:e4b 사용)
+    monkeypatch.setenv("LLM_MODEL", "gemma4:e4b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
 @pytest.mark.integration
