@@ -67,4 +67,11 @@ def initial_state(task: str) -> AgentState:
         result=None,
         error=None,
         iterations=0,
+        task_progress={
+            "total_steps": 0,
+            "completed_steps": 0,
+            "current_step": 0,
+            "step_info": {},
+        },
+        collected_data={},
     )

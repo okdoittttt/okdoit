@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage
 
@@ -16,6 +16,14 @@ class AgentState(TypedDict):
         result (Optional[str]): 최종 결과 메시지
         error (Optional[str]): 에러 메시지
         iterations (int): 현재 반복 횟수
+        task_progress (dict): 작업 진전도 추적
+            - total_steps: 예상되는 전체 단계 수
+            - completed_steps: 완료된 단계 수
+            - current_step: 현재 진행 중인 단계
+            - step_info: 각 단계별 상세 정보
+        collected_data (dict): 수집한 정보 누적
+            - key: 정보 식별자 (예: "부산", "서울")
+            - value: {"information": str, "collected": bool}
     """
 
     task: str
@@ -28,3 +36,5 @@ class AgentState(TypedDict):
     result: Optional[str]
     error: Optional[str]
     iterations: int
+    task_progress: dict[str, Any]
+    collected_data: dict[str, dict[str, Any]]

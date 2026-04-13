@@ -73,8 +73,9 @@ def _build_messages(state: AgentState) -> list:
         }
     ]
 
-    if state.get("screenshot_path") and os.path.exists(state["screenshot_path"]):
-        with open(state["screenshot_path"], "rb") as f:
+    screenshot_path = state.get("screenshot_path")
+    if screenshot_path and os.path.exists(screenshot_path):
+        with open(screenshot_path, "rb") as f:
             image_data = base64.standard_b64encode(f.read()).decode("utf-8")
         content.append({
             "type": "image_url",

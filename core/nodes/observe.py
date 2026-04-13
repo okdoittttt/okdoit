@@ -36,6 +36,7 @@ async def observe(state: AgentState) -> AgentState:
             "screenshot_path": screenshot_path,
             "dom_text": dom_text,
             "current_url": current_url,
+            "iterations": state["iterations"] + 1,
             "error": None,
         }
     except RuntimeError as e:
