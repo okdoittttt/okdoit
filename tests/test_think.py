@@ -5,7 +5,7 @@ import pytest
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from core.nodes.think import _build_messages, _parse_response, think
+from core.nodes.think import _apply_step_done, _build_messages, _format_plan, _parse_response, think
 from core.state import AgentState
 
 load_dotenv()
@@ -23,6 +23,7 @@ def make_state(**kwargs) -> AgentState:
         "result": None,
         "error": None,
         "iterations": 0,
+        "subtasks": [],
     }
     return {**base, **kwargs}
 
@@ -215,6 +216,137 @@ async def test_think_records_error_on_llm_failure():
 
     assert result["error"] is not None
     assert "[think]" in result["error"]
+
+
+# ── _format_plan 단위 테스트 ─────────────────────────────────────────────────
+
+def test_format_plan_empty():
+    """subtasks가 비어있으면 빈 문자열을 반환한다."""
+    assert _format_plan([]) == ""
+
+
+def test_format_plan_marks_first_incomplete_as_current():
+    """첫 번째 미완료 단계에 ▶ 아이콘이 붙는지 확인한다."""
+    subtasks = [
+        {"description": "단계1", "done": True},
+        {"description": "단계2", "done": False},
+        {"description": "단계3", "done": False},
+    ]
+    result = _format_plan(subtasks)
+    assert "✅ 1. 단계1" in result
+    assert "▶ 2. 단계2  (현재)" in result
+    assert "⬜ 3. 단계3" in result
+
+
+def test_format_plan_all_done():
+    """모든 단계가 완료되면 ✅만 표시한다."""
+    subtasks = [
+        {"description": "단계1", "done": True},
+        {"description": "단계2", "done": True},
+    ]
+    result = _format_plan(subtasks)
+    assert "▶" not in result
+    assert "✅ 1. 단계1" in result
+    assert "✅ 2. 단계2" in result
+
+
+def test_format_plan_all_pending():
+    """모든 단계가 미완료이면 첫 번째만 ▶이고 나머지는 ⬜이다."""
+    subtasks = [
+        {"description": "A", "done": False},
+        {"description": "B", "done": False},
+    ]
+    result = _format_plan(subtasks)
+    assert "▶ 1. A  (현재)" in result
+    assert "⬜ 2. B" in result
+
+
+# ── _apply_step_done 단위 테스트 ──────────────────────────────────────────────
+
+def test_apply_step_done_marks_first_incomplete():
+    """step_done=True이면 첫 번째 미완료 단계가 done=True로 변경된다."""
+    subtasks = [
+        {"description": "단계1", "done": True},
+        {"description": "단계2", "done": False},
+        {"description": "단계3", "done": False},
+    ]
+    result = _apply_step_done(subtasks, step_done=True)
+    assert result[0]["done"] is True
+    assert result[1]["done"] is True
+    assert result[2]["done"] is False
+
+
+def test_apply_step_done_false_returns_unchanged():
+    """step_done=False이면 subtasks가 변경되지 않는다."""
+    subtasks = [{"description": "단계1", "done": False}]
+    result = _apply_step_done(subtasks, step_done=False)
+    assert result[0]["done"] is False
+
+
+def test_apply_step_done_does_not_mutate_original():
+    """원본 subtasks가 변경되지 않는지 확인한다."""
+    subtasks = [{"description": "단계1", "done": False}]
+    _apply_step_done(subtasks, step_done=True)
+    assert subtasks[0]["done"] is False
+
+
+# ── think()에서 step_done 처리 테스트 ────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_think_advances_subtask_when_step_done():
+    """LLM이 step_done=True를 반환하면 첫 번째 미완료 단계가 done으로 업데이트된다."""
+    action = {"type": "click", "value": "확인"}
+    mock_llm = _make_llm_mock({
+        "thought": "이 단계 완료",
+        "action": action,
+        "step_done": True,
+        "is_done": False,
+        "result": None,
+    })
+    subtasks = [
+        {"description": "단계1", "done": False},
+        {"description": "단계2", "done": False},
+    ]
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(subtasks=subtasks))
+
+    assert result["subtasks"][0]["done"] is True
+    assert result["subtasks"][1]["done"] is False
+
+
+@pytest.mark.asyncio
+async def test_think_does_not_advance_subtask_when_step_not_done():
+    """LLM이 step_done=False를 반환하면 subtasks가 변경되지 않는다."""
+    action = {"type": "click", "value": "확인"}
+    mock_llm = _make_llm_mock({
+        "thought": "아직 진행 중",
+        "action": action,
+        "step_done": False,
+        "is_done": False,
+        "result": None,
+    })
+    subtasks = [{"description": "단계1", "done": False}]
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(subtasks=subtasks))
+
+    assert result["subtasks"][0]["done"] is False
+
+
+@pytest.mark.asyncio
+async def test_build_messages_includes_plan_section():
+    """subtasks가 있으면 [작업 계획] 섹션이 HumanMessage에 포함되는지 확인한다."""
+    subtasks = [
+        {"description": "페이지 이동", "done": True},
+        {"description": "버튼 클릭", "done": False},
+    ]
+    state = make_state(subtasks=subtasks)
+    messages = _build_messages(state)
+
+    human = messages[-1]
+    text = human.content[0]["text"]
+    assert "[작업 계획]" in text
+    assert "✅" in text
+    assert "▶" in text
 
 
 # ── think() 통합 테스트 ────────────────────────────────────────────────────────
