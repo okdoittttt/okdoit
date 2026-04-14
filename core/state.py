@@ -38,3 +38,4 @@ class AgentState(TypedDict):
     iterations: int
     task_progress: dict[str, Any]
     collected_data: dict[str, dict[str, Any]]
+    extracted_result: Optional[str]

@@ -1,5 +1,7 @@
 """상호작용 액션 - 클릭, 입력, 대기."""
 
+from typing import Optional
+
 from playwright.async_api import Page
 
 from core.actions._registry import registry
@@ -221,3 +223,107 @@ async def check(page: Page, action: dict) -> None:
             continue
 
     raise RuntimeError(f"체크박스/라디오를 찾을 수 없습니다: '{target}'")
+
+
+@registry.register("extract")
+async def extract(page: Page, action: dict) -> Optional[str]:
+    """CSS 선택자 또는 텍스트로 요소의 내용을 추출한다.
+
+    CSS 선택자로 먼저 시도하고, 실패하면 텍스트 기반 locator로 시도한다.
+    추출된 텍스트는 다음 think 사이클에서 [추출된 데이터]로 LLM에 전달된다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "extract", "value": "<CSS 선택자 또는 텍스트>"}
+
+    Returns:
+        추출된 텍스트 문자열
+
+    Raises:
+        RuntimeError: 요소를 찾을 수 없거나 추출에 실패한 경우
+    """
+    target: str = action["value"]
+
+    try:
+        result: str = await page.evaluate(
+            """(selector) => {
+                const elements = document.querySelectorAll(selector);
+                if (elements.length === 0) return null;
+                return Array.from(elements)
+                    .map(el => (el.innerText || el.textContent || '').trim())
+                    .filter(t => t.length > 0)
+                    .join('\\n');
+            }""",
+            target,
+        )
+        if result:
+            return result
+    except Exception:
+        pass
+
+    try:
+        locator = page.get_by_text(target, exact=False)
+        text = await locator.first.inner_text(timeout=5_000)
+        if text:
+            return text.strip()
+    except Exception:
+        pass
+
+    raise RuntimeError(f"extract 실패: '{target}'에 해당하는 요소를 찾을 수 없습니다")
+
+
+@registry.register("execute_js")
+async def execute_js(page: Page, action: dict) -> Optional[str]:
+    """브라우저에서 JavaScript를 실행하고 결과를 반환한다.
+
+    page.evaluate()를 통해 브라우저 샌드박스 내에서 실행된다.
+    결과는 다음 think 사이클에서 [추출된 데이터]로 LLM에 전달된다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "execute_js", "value": "<JS 코드>"}
+
+    Returns:
+        JS 실행 결과를 문자열로 변환한 값. 결과가 None이면 빈 문자열.
+
+    Raises:
+        RuntimeError: JS 실행 중 오류가 발생한 경우
+    """
+    js_code: str = action["value"]
+    try:
+        result = await page.evaluate(js_code)
+        return str(result) if result is not None else ""
+    except Exception as e:
+        raise RuntimeError(f"JS 실행 실패: {e}")
+
+
+@registry.register("drag_and_drop")
+async def drag_and_drop(page: Page, action: dict) -> None:
+    """source 요소를 target 위치로 드래그 앤 드롭한다.
+
+    텍스트 기반 locator로 먼저 시도하고, 실패하면 CSS 선택자로 시도한다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "drag_and_drop", "source": "<드래그할 요소>", "target": "<드롭할 위치>"}
+
+    Raises:
+        RuntimeError: 드래그 앤 드롭에 실패한 경우
+    """
+    source: str = action["source"]
+    target: str = action["target"]
+    timeout = 10_000
+
+    try:
+        source_locator = page.get_by_text(source, exact=False).first
+        target_locator = page.get_by_text(target, exact=False).first
+        await source_locator.drag_to(target_locator, timeout=timeout)
+        return
+    except Exception:
+        pass
+
+    try:
+        await page.drag_and_drop(source, target, timeout=timeout)
+        return
+    except Exception as e:
+        raise RuntimeError(f"드래그 앤 드롭 실패: '{source}' → '{target}' - {e}")

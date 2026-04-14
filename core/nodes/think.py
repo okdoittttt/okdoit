@@ -62,6 +62,9 @@ def _build_messages(state: AgentState) -> list:
     """
     system_prompt = _PROMPT_PATH.read_text(encoding="utf-8")
 
+    extracted = state.get("extracted_result")
+    extracted_section = f"\n\n[추출된 데이터]\n{extracted}" if extracted else ""
+
     content: list = [
         {
             "type": "text",
@@ -69,6 +72,7 @@ def _build_messages(state: AgentState) -> list:
                 f"목표: {state['task']}\n"
                 f"현재 URL: {state['current_url']}\n\n"
                 f"DOM 텍스트:\n{state['dom_text'] or '(없음)'}"
+                f"{extracted_section}"
             ),
         }
     ]

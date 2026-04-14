@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from playwright.async_api import Page
 
-ActionHandler = Callable[[Page, dict], Awaitable[None]]
+ActionHandler = Callable[[Page, dict], Awaitable[Optional[str]]]
 
 
 class ActionRegistry:
@@ -34,12 +34,15 @@ class ActionRegistry:
 
         return decorator
 
-    async def dispatch(self, page: Page, action: dict) -> None:
+    async def dispatch(self, page: Page, action: dict) -> Optional[str]:
         """액션 타입에 맞는 핸들러를 찾아 실행한다.
 
         Args:
             page: 현재 Playwright 페이지
             action: _parse_action()이 반환한 액션 딕셔너리
+
+        Returns:
+            핸들러가 반환한 문자열 데이터. 대부분의 액션은 None을 반환한다.
 
         Raises:
             ValueError: 등록되지 않은 액션 타입인 경우
@@ -48,7 +51,7 @@ class ActionRegistry:
         handler = self._handlers.get(action_type)
         if handler is None:
             raise ValueError(f"[act] 알 수 없는 액션 타입: '{action_type}'")
-        await handler(page, action)
+        return await handler(page, action)
 
 
 registry = ActionRegistry()

@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
@@ -31,9 +32,14 @@ async def act(state: AgentState) -> AgentState:
         if "error" in action:
             return {**state, "error": action["error"], "iterations": state["iterations"] + 1}
 
-        await _execute(page, action)
+        extracted = await _execute(page, action)
 
-        return {**state, "error": None, "iterations": state["iterations"] + 1}
+        return {
+            **state,
+            "error": None,
+            "extracted_result": extracted,
+            "iterations": state["iterations"] + 1,
+        }
     except PlaywrightTimeoutError as e:
         return {**state, "error": f"[act] Timeout: {e}", "iterations": state["iterations"] + 1}
     except RuntimeError as e:
@@ -62,14 +68,17 @@ def _parse_action(action: str) -> dict:
     return parsed
 
 
-async def _execute(page: Page, action: dict) -> None:
-    """파싱된 액션을 registry를 통해 실행한다.
+async def _execute(page: Page, action: dict) -> Optional[str]:
+    """파싱된 액션을 registry를 통해 실행하고 결과를 반환한다.
 
     Args:
         page: 현재 Playwright 페이지
         action: _parse_action()이 반환한 액션 딕셔너리
 
+    Returns:
+        액션 핸들러가 반환한 문자열. extract/execute_js 등 데이터 반환 액션에서만 값이 있다.
+
     Raises:
         ValueError: 등록되지 않은 액션 타입인 경우
     """
-    await registry.dispatch(page, action)
+    return await registry.dispatch(page, action)

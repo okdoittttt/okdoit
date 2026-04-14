@@ -23,6 +23,11 @@ JSON 필드:
 - 요소 대기:  {"type": "wait_for_element", "value": "대기할 요소 텍스트"} 또는 {"type": "wait_for_element", "value": "요소", "timeout": 15}
 - 체크박스:   {"type": "check", "value": "체크박스 레이블"} 또는 {"type": "check", "value": "레이블", "state": "uncheck"}
 - 파일 업로드: {"type": "upload_file", "value": "파일 선택 버튼", "path": "/절대/경로/파일.pdf"}
+- 데이터 추출: {"type": "extract", "value": "CSS 선택자 또는 요소 텍스트"}
+- 스크린샷:   {"type": "screenshot"} 또는 {"type": "screenshot", "filename": "step1.png"}
+- JS 실행:    {"type": "execute_js", "value": "return document.title"}
+- 요소 스크롤: {"type": "scroll_to_element", "value": "스크롤할 요소 텍스트"}
+- 드래그앤드롭: {"type": "drag_and_drop", "source": "드래그할 요소", "target": "드롭할 위치"}
 
 전체 응답 예시:
 {"thought": "검색을 위해 구글로 이동한다", "action": {"type": "navigate", "value": "https://www.google.com"}, "is_done": false, "result": null}
@@ -41,5 +46,10 @@ JSON 필드:
 - wait_for_element는 동적으로 로딩되는 요소를 기다릴 때 사용하며, timeout 기본값은 15초(최대 30초)다
 - check의 state 기본값은 "check"(선택)이며, 해제할 때는 "uncheck"를 명시한다
 - upload_file의 path는 절대 경로여야 하며 실제로 존재하는 파일이어야 한다
+- extract는 CSS 선택자(예: "h1", ".price", "#result") 또는 요소 텍스트로 페이지 데이터를 추출한다. 결과는 [추출된 데이터]로 다음 턴에 표시된다
+- execute_js는 return 문으로 값을 반환할 수 있다 (예: "return document.querySelectorAll('a').length")
+- screenshot은 중요한 상태를 기록할 때 사용하며 filename을 생략하면 타임스탬프로 저장된다
+- scroll_to_element는 화면 밖 요소를 보이게 할 때 사용한다. scroll과 달리 정확한 요소를 타겟으로 한다
+- drag_and_drop의 source와 target은 요소 텍스트 또는 CSS 선택자를 사용한다
 
 목표를 달성했다고 판단하면 is_done을 true로 설정하고 result에 결과를 작성한다.

@@ -74,4 +74,5 @@ def initial_state(task: str) -> AgentState:
             "step_info": {},
         },
         collected_data={},
+        extracted_result=None,
     )
