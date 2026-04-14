@@ -43,6 +43,7 @@ async def think(state: AgentState) -> AgentState:
             "is_done": parsed["is_done"],
             "result": parsed.get("result"),
             "subtasks": updated_subtasks,
+            "last_action_error": None,
             "error": None,
         }
     except KeyError as e:
@@ -71,6 +72,12 @@ def _build_messages(state: AgentState) -> list:
     subtasks = state.get("subtasks", [])
     plan_section = f"\n\n{_format_plan(subtasks)}" if subtasks else ""
 
+    last_error = state.get("last_action_error")
+    error_section = (
+        f"\n\n[이전 액션 오류]\n{last_error}\n→ 다른 방법으로 동일한 목표를 달성하세요."
+        if last_error else ""
+    )
+
     content: list = [
         {
             "type": "text",
@@ -79,6 +86,7 @@ def _build_messages(state: AgentState) -> list:
                 f"현재 URL: {state['current_url']}\n\n"
                 f"DOM 텍스트:\n{state['dom_text'] or '(없음)'}"
                 f"{plan_section}"
+                f"{error_section}"
                 f"{extracted_section}"
             ),
         }

@@ -27,6 +27,8 @@ class AgentState(TypedDict):
         subtasks (list[dict]): plan 노드가 분해한 작업 단계 목록
             - description: 단계 설명 문자열
             - done: 완료 여부
+        consecutive_errors (int): 연속으로 발생한 에러 횟수. 성공 시 0으로 리셋된다.
+        last_action_error (Optional[str]): LLM에게 전달할 직전 액션의 에러 메시지.
     """
 
     task: str
@@ -43,3 +45,5 @@ class AgentState(TypedDict):
     collected_data: dict[str, dict[str, Any]]
     extracted_result: Optional[str]
     subtasks: list[dict[str, Any]]
+    consecutive_errors: int
+    last_action_error: Optional[str]

@@ -44,7 +44,7 @@ def _should_continue(state: AgentState) -> str:
     Returns:
         루프를 종료할 경우 "__end__", 계속할 경우 "observe"
     """
-    if state["is_done"] or state.get("error"):
+    if state["is_done"]:
         return END
 
     return "observe"
@@ -79,4 +79,6 @@ def initial_state(task: str) -> AgentState:
         collected_data={},
         extracted_result=None,
         subtasks=[],
+        consecutive_errors=0,
+        last_action_error=None,
     )
