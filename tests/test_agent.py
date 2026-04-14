@@ -102,7 +102,7 @@ def test_print_step_act_outputs_nothing(capsys):
 
 def _make_graph_mock(steps: list[dict]) -> MagicMock:
     """astream()이 steps를 순서대로 반환하는 그래프 mock을 생성한다."""
-    async def fake_astream(state):
+    async def fake_astream(state, **kwargs):
         for step in steps:
             yield step
 
