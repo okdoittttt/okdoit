@@ -50,6 +50,7 @@ JSON 필드:
 - check의 state 기본값은 "check"(선택)이며, 해제할 때는 "uncheck"를 명시한다
 - upload_file의 path는 절대 경로여야 하며 실제로 존재하는 파일이어야 한다
 - extract는 CSS 선택자(예: "h1", ".price", "#result") 또는 요소 텍스트로 페이지 데이터를 추출한다. 결과는 [추출된 데이터]로 다음 턴에 표시된다
+- 테이블 데이터를 추출할 때는 반드시 행(row) 단위 또는 전체 테이블을 한 번에 추출한다. 종목명·가격·등락률처럼 같은 행에 속하는 데이터를 열(column)별로 나눠서 여러 번 추출하면 순서가 어긋나 데이터가 오염된다. 예: `table tbody tr` (행 전체) 또는 `table.type_2` (테이블 전체)
 - execute_js는 return 문으로 값을 반환할 수 있다 (예: "return document.querySelectorAll('a').length")
 - screenshot은 중요한 상태를 기록할 때 사용하며 filename을 생략하면 타임스탬프로 저장된다
 - scroll_to_element는 화면 밖 요소를 보이게 할 때 사용한다. scroll과 달리 정확한 요소를 타겟으로 한다
