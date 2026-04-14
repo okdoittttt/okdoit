@@ -34,12 +34,15 @@ async def think(state: AgentState) -> AgentState:
         if "error" in parsed:
             return {**state, "error": parsed["error"]}
 
+        updated_subtasks = _apply_step_done(state.get("subtasks", []), parsed.get("step_done", False))
+
         return {
             **state,
             "messages": list(state["messages"]) + [response],
             "last_action": json.dumps(parsed["action"], ensure_ascii=False),
             "is_done": parsed["is_done"],
             "result": parsed.get("result"),
+            "subtasks": updated_subtasks,
             "error": None,
         }
     except KeyError as e:
@@ -65,6 +68,9 @@ def _build_messages(state: AgentState) -> list:
     extracted = state.get("extracted_result")
     extracted_section = f"\n\n[추출된 데이터]\n{extracted}" if extracted else ""
 
+    subtasks = state.get("subtasks", [])
+    plan_section = f"\n\n{_format_plan(subtasks)}" if subtasks else ""
+
     content: list = [
         {
             "type": "text",
@@ -72,6 +78,7 @@ def _build_messages(state: AgentState) -> list:
                 f"목표: {state['task']}\n"
                 f"현재 URL: {state['current_url']}\n\n"
                 f"DOM 텍스트:\n{state['dom_text'] or '(없음)'}"
+                f"{plan_section}"
                 f"{extracted_section}"
             ),
         }
@@ -91,6 +98,58 @@ def _build_messages(state: AgentState) -> list:
         *state["messages"],
         HumanMessage(content=content),
     ]
+
+
+def _format_plan(subtasks: list[dict]) -> str:
+    """subtasks 목록을 진행 상태가 표시된 문자열로 포맷한다.
+
+    완료된 단계는 ✅, 현재 진행 중인 첫 번째 미완료 단계는 ▶, 나머지는 ⬜로 표시한다.
+
+    Args:
+        subtasks: [{"description": str, "done": bool}, ...] 형태의 목록
+
+    Returns:
+        포맷된 계획 문자열. subtasks가 비어있으면 빈 문자열.
+    """
+    if not subtasks:
+        return ""
+
+    current_marked = False
+    lines = ["[작업 계획]"]
+    for i, task in enumerate(subtasks, 1):
+        if task["done"]:
+            icon = "✅"
+        elif not current_marked:
+            icon = "▶"
+            current_marked = True
+        else:
+            icon = "⬜"
+        suffix = "  (현재)" if icon == "▶" else ""
+        lines.append(f"{icon} {i}. {task['description']}{suffix}")
+    return "\n".join(lines)
+
+
+def _apply_step_done(subtasks: list[dict], step_done: bool) -> list[dict]:
+    """step_done이 True이면 첫 번째 미완료 단계를 완료 처리한 새 목록을 반환한다.
+
+    원본 subtasks는 변경하지 않는다.
+
+    Args:
+        subtasks: 현재 단계 목록
+        step_done: think 노드 LLM 응답의 step_done 값
+
+    Returns:
+        업데이트된 subtasks 복사본.
+    """
+    if not step_done:
+        return subtasks
+
+    updated = [dict(t) for t in subtasks]
+    for task in updated:
+        if not task["done"]:
+            task["done"] = True
+            break
+    return updated
 
 
 def _parse_response(response: str) -> dict:

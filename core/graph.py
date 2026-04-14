@@ -2,6 +2,7 @@ from langgraph.graph import END, START, StateGraph
 
 from core.nodes.act import act
 from core.nodes.observe import observe
+from core.nodes.plan import plan
 from core.nodes.think import think
 from core.nodes.verify import verify
 from core.state import AgentState
@@ -18,12 +19,14 @@ def create_graph():
     """
     graph = StateGraph(AgentState)
 
+    graph.add_node("plan", plan)
     graph.add_node("observe", observe)
     graph.add_node("think", think)
     graph.add_node("act", act)
     graph.add_node("verify", verify)
 
-    graph.add_edge(START, "observe")
+    graph.add_edge(START, "plan")
+    graph.add_edge("plan", "observe")
     graph.add_edge("observe", "think")
     graph.add_edge("think", "act")
     graph.add_edge("act", "verify")
@@ -75,4 +78,5 @@ def initial_state(task: str) -> AgentState:
         },
         collected_data={},
         extracted_result=None,
+        subtasks=[],
     )

@@ -24,6 +24,9 @@ class AgentState(TypedDict):
         collected_data (dict): 수집한 정보 누적
             - key: 정보 식별자 (예: "부산", "서울")
             - value: {"information": str, "collected": bool}
+        subtasks (list[dict]): plan 노드가 분해한 작업 단계 목록
+            - description: 단계 설명 문자열
+            - done: 완료 여부
     """
 
     task: str
@@ -39,3 +42,4 @@ class AgentState(TypedDict):
     task_progress: dict[str, Any]
     collected_data: dict[str, dict[str, Any]]
     extracted_result: Optional[str]
+    subtasks: list[dict[str, Any]]

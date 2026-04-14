@@ -7,6 +7,7 @@
 JSON 필드:
 - thought: 현재 상황 분석 및 다음 행동 이유
 - action: 다음에 실행할 액션 객체 (아래 스키마 참고)
+- step_done: 현재 단계를 완료했으면 true, 아직 진행 중이면 false (기본값 false)
 - is_done: 목표를 달성했으면 true, 아니면 false
 - result: 목표 달성 시 사용자에게 전달할 최종 결과. 미달성 시 null
 
@@ -30,7 +31,7 @@ JSON 필드:
 - 드래그앤드롭: {"type": "drag_and_drop", "source": "드래그할 요소", "target": "드롭할 위치"}
 
 전체 응답 예시:
-{"thought": "검색을 위해 구글로 이동한다", "action": {"type": "navigate", "value": "https://www.google.com"}, "is_done": false, "result": null}
+{"thought": "검색을 위해 구글로 이동한다", "action": {"type": "navigate", "value": "https://www.google.com"}, "step_done": false, "is_done": false, "result": null}
 
 액션 작성 규칙:
 - 현재 URL이 비어있거나 "about:blank"이면 반드시 navigate 액션을 먼저 수행한다
@@ -51,5 +52,6 @@ JSON 필드:
 - screenshot은 중요한 상태를 기록할 때 사용하며 filename을 생략하면 타임스탬프로 저장된다
 - scroll_to_element는 화면 밖 요소를 보이게 할 때 사용한다. scroll과 달리 정확한 요소를 타겟으로 한다
 - drag_and_drop의 source와 target은 요소 텍스트 또는 CSS 선택자를 사용한다
+- step_done은 [작업 계획]의 현재 단계(▶ 표시)를 완료했다고 판단될 때 true로 설정한다. 한 단계에 여러 액션이 필요한 경우, 마지막 액션에서만 true로 설정한다
 
 목표를 달성했다고 판단하면 is_done을 true로 설정하고 result에 결과를 작성한다.
