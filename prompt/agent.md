@@ -18,6 +18,11 @@ JSON 필드:
 - 스크롤:     {"type": "scroll", "value": "down"} 또는 {"type": "scroll", "value": "up"}
 - 뒤로 가기:  {"type": "back"} 또는 {"type": "back", "count": 2}
 - 대기:       {"type": "wait", "value": 2}
+- 요소 호버:   {"type": "hover", "value": "마우스를 올릴 요소 텍스트"}
+- 새로고침:   {"type": "refresh"}
+- 요소 대기:  {"type": "wait_for_element", "value": "대기할 요소 텍스트"} 또는 {"type": "wait_for_element", "value": "요소", "timeout": 15}
+- 체크박스:   {"type": "check", "value": "체크박스 레이블"} 또는 {"type": "check", "value": "레이블", "state": "uncheck"}
+- 파일 업로드: {"type": "upload_file", "value": "파일 선택 버튼", "path": "/절대/경로/파일.pdf"}
 
 전체 응답 예시:
 {"thought": "검색을 위해 구글로 이동한다", "action": {"type": "navigate", "value": "https://www.google.com"}, "is_done": false, "result": null}
@@ -31,5 +36,10 @@ JSON 필드:
 - press에서 target 없이 사용 시 현재 포커스된 요소에 키를 입력한다
 - back 액션은 잘못된 페이지에 진입했을 때 이전 페이지로 돌아갈 때 사용한다
 - back의 count를 생략하면 1단계 뒤로 가고, count를 지정하면 여러 단계 뒤로 갈 수 있다
+- hover는 드롭다운 메뉴를 펼치거나 툴팁을 표시할 때 사용한다
+- refresh는 페이지 로딩 오류 또는 상태 갱신이 필요할 때 사용한다
+- wait_for_element는 동적으로 로딩되는 요소를 기다릴 때 사용하며, timeout 기본값은 15초(최대 30초)다
+- check의 state 기본값은 "check"(선택)이며, 해제할 때는 "uncheck"를 명시한다
+- upload_file의 path는 절대 경로여야 하며 실제로 존재하는 파일이어야 한다
 
 목표를 달성했다고 판단하면 is_done을 true로 설정하고 result에 결과를 작성한다.

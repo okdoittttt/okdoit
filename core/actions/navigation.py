@@ -29,6 +29,17 @@ async def scroll(page: Page, action: dict) -> None:
     await page.evaluate(f"window.scrollBy(0, {delta})")
 
 
+@registry.register("refresh")
+async def refresh(page: Page, action: dict) -> None:
+    """현재 페이지를 새로고침한다.
+
+    Args:
+        page: 현재 Playwright 페이지
+        action: {"type": "refresh"}
+    """
+    await page.reload(timeout=30_000, wait_until="domcontentloaded")
+
+
 @registry.register("back")
 async def back(page: Page, action: dict) -> None:
     """이전 페이지로 돌아간다.

@@ -5,5 +5,6 @@ from core.actions._registry import ActionRegistry, registry
 # 하단 임포트: 데코레이터 등록을 트리거하는 사이드이펙트
 import core.actions.navigation  # noqa: F401, E402
 import core.actions.interaction  # noqa: F401, E402
+import core.actions.file_io      # noqa: F401, E402
 
 __all__ = ["ActionRegistry", "registry"]
