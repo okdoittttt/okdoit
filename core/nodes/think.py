@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -171,17 +172,32 @@ def _apply_step_done(subtasks: list[dict], step_done: bool) -> list[dict]:
     return updated
 
 
+def _strip_code_fence(text: str) -> str:
+    """마크다운 코드 펜스(```json ... ```)를 제거하고 내부 텍스트만 반환한다.
+
+    일부 LLM이 JSON 앞뒤에 코드 펜스를 붙이는 경우를 처리한다.
+
+    Args:
+        text: LLM 원본 응답 문자열
+
+    Returns:
+        코드 펜스가 제거된 문자열. 펜스가 없으면 그대로 반환한다.
+    """
+    match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", text.strip(), re.DOTALL)
+    return match.group(1).strip() if match else text.strip()
+
+
 def _parse_response(response: str) -> dict:
     """LLM 응답 JSON을 파싱한다.
 
     Args:
-        response: LLM이 반환한 순수 JSON 문자열
+        response: LLM이 반환한 JSON 문자열 (마크다운 펜스 포함 가능)
 
     Returns:
         파싱된 딕셔너리. 실패 시 {"error": "..."} 형태로 반환한다.
     """
     try:
-        parsed = json.loads(response.strip())
+        parsed = json.loads(_strip_code_fence(response))
     except json.JSONDecodeError as e:
         return {"error": f"[think] JSON 파싱 실패: {e} | 원문: {response[:200]}"}
 

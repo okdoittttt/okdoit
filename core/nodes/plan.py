@@ -1,6 +1,7 @@
 """Plan 노드 - 작업을 단계별 subtask로 분해한다."""
 
 import json
+import re
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -49,18 +50,33 @@ async def plan(state: AgentState) -> AgentState:
         return {**state, "subtasks": [], "error": f"[plan] Unexpected error: {e}"}
 
 
+def _strip_code_fence(text: str) -> str:
+    """마크다운 코드 펜스(```json ... ```)를 제거하고 내부 텍스트만 반환한다.
+
+    일부 LLM이 JSON 앞뒤에 코드 펜스를 붙이는 경우를 처리한다.
+
+    Args:
+        text: LLM 원본 응답 문자열
+
+    Returns:
+        코드 펜스가 제거된 문자열. 펜스가 없으면 그대로 반환한다.
+    """
+    match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", text.strip(), re.DOTALL)
+    return match.group(1).strip() if match else text.strip()
+
+
 def _parse_subtasks(response: str) -> list[dict]:
     """LLM 응답에서 단계 목록을 파싱해 subtask 딕셔너리 리스트로 반환한다.
 
     Args:
-        response: LLM이 반환한 순수 JSON 배열 문자열
+        response: LLM이 반환한 JSON 배열 문자열 (마크다운 펜스 포함 가능)
 
     Returns:
         [{"description": str, "done": False}, ...] 형태의 리스트.
         파싱 실패 또는 유효하지 않은 형식이면 빈 리스트를 반환한다.
     """
     try:
-        parsed = json.loads(response.strip())
+        parsed = json.loads(_strip_code_fence(response))
     except json.JSONDecodeError:
         return []
 

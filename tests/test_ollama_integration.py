@@ -72,7 +72,11 @@ async def test_ollama_responds_with_json():
         ))
     ])
 
-    parsed = json.loads(response.content.strip())
+    import re
+    raw = response.content.strip()
+    match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", raw, re.DOTALL)
+    cleaned = match.group(1).strip() if match else raw
+    parsed = json.loads(cleaned)
     assert "thought" in parsed
     assert "action" in parsed
     assert "is_done" in parsed

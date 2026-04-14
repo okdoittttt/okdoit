@@ -151,6 +151,7 @@ async def test_graph_terminates_after_max_consecutive_errors(tmp_path):
         patch("core.nodes.observe.BrowserManager", return_value=mock_manager),
         patch("core.nodes.act.BrowserManager", return_value=mock_manager),
         patch("core.nodes.plan.build_llm", return_value=mock_llm),
+        patch("core.nodes.think.build_llm", return_value=mock_llm),
     ):
         graph = create_graph()
         result = await graph.ainvoke(initial_state("테스트"))

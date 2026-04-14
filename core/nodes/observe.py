@@ -1,6 +1,6 @@
 from typing import Any
 
-from langsmith import traceable
+from langsmith import trace as ls_trace
 from playwright.async_api import Page
 
 from core.browser import BrowserManager
@@ -47,7 +47,6 @@ async def observe(state: AgentState) -> AgentState:
         return {**state, "error": f"[observe] Unexpected error: {e}"}
 
 
-@traceable(name="browser_extract_dom", tags=["browser", "observe"])
 async def _extract_structured_dom(page: Page) -> str:
     """페이지에서 구조화된 DOM 정보를 추출하고 포맷한다.
 
@@ -61,22 +60,27 @@ async def _extract_structured_dom(page: Page) -> str:
         포맷된 DOM 정보 문자열. 추출 실패 시 에러 메시지를 반환한다.
     """
     try:
-        title = await page.title()
         url = page.url
-        meta_description = await _get_meta_description(page)
-        clickable_elements = await _extract_clickable_elements(page)
-        page_content = await _extract_page_content(page)
-        trimmed_content = _trim_text(page_content)
+        with ls_trace(
+            name="browser_extract_dom",
+            inputs={"url": url},
+            tags=["browser", "observe"],
+        ):
+            title = await page.title()
+            meta_description = await _get_meta_description(page)
+            clickable_elements = await _extract_clickable_elements(page)
+            page_content = await _extract_page_content(page)
+            trimmed_content = _trim_text(page_content)
 
-        dom_info = {
-            "title": title,
-            "url": url,
-            "meta_description": meta_description,
-            "clickable_elements": clickable_elements,
-            "page_content": trimmed_content,
-        }
+            dom_info = {
+                "title": title,
+                "url": url,
+                "meta_description": meta_description,
+                "clickable_elements": clickable_elements,
+                "page_content": trimmed_content,
+            }
 
-        return _format_dom_info(dom_info)
+            return _format_dom_info(dom_info)
     except Exception as e:
         return f"[dom 추출 실패] {e}"
 
