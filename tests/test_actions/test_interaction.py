@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from core.actions.navigation import scroll
-from core.actions.interaction import wait, click, type_text, press
+from core.actions.interaction import wait, click, type_text, press, hover, wait_for_element, check
 
 
 @pytest.mark.asyncio
@@ -88,3 +88,122 @@ async def test_press_raises_when_target_not_found():
 
     with pytest.raises(RuntimeError, match="키 입력할 요소를 찾을 수 없습니다"):
         await press(mock_page, {"type": "press", "value": "Enter", "target": "없는요소"})
+
+
+@pytest.mark.asyncio
+async def test_hover_calls_hover_on_locator():
+    """hover가 locator.first.hover()를 호출하는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.hover = AsyncMock()
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+
+    await hover(mock_page, {"type": "hover", "value": "메뉴"})
+
+    mock_locator.first.hover.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_hover_raises_when_all_locators_fail():
+    """모든 locator가 실패하면 RuntimeError를 발생시키는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.hover = AsyncMock(side_effect=Exception("not found"))
+    mock_page.get_by_text.return_value = mock_locator
+    mock_page.get_by_role.return_value = mock_locator
+    mock_page.locator.return_value = mock_locator
+
+    with pytest.raises(RuntimeError, match="호버할 요소를 찾을 수 없습니다"):
+        await hover(mock_page, {"type": "hover", "value": "없는요소"})
+
+
+@pytest.mark.asyncio
+async def test_wait_for_element_calls_wait_for_visible():
+    """wait_for_element가 locator.first.wait_for(state='visible')를 호출하는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.wait_for = AsyncMock()
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+
+    await wait_for_element(mock_page, {"type": "wait_for_element", "value": "로딩완료"})
+
+    mock_locator.first.wait_for.assert_called_once_with(
+        state="visible", timeout=15_000
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_element_clamps_timeout_to_max():
+    """timeout이 30초를 초과하면 30초로 클램핑하는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.wait_for = AsyncMock()
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+
+    await wait_for_element(mock_page, {"type": "wait_for_element", "value": "요소", "timeout": 999})
+
+    mock_locator.first.wait_for.assert_called_once_with(
+        state="visible", timeout=30_000
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_element_raises_when_not_found():
+    """모든 locator가 실패하면 RuntimeError를 발생시키는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.wait_for = AsyncMock(side_effect=Exception("timeout"))
+    mock_page.get_by_text.return_value = mock_locator
+    mock_page.locator.return_value = mock_locator
+
+    with pytest.raises(RuntimeError, match="요소가 나타나지 않습니다"):
+        await wait_for_element(mock_page, {"type": "wait_for_element", "value": "없는요소"})
+
+
+@pytest.mark.asyncio
+async def test_check_calls_check_by_default():
+    """state 생략 시 locator.first.check()를 호출하는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.check = AsyncMock()
+    mock_page.get_by_label = MagicMock(return_value=mock_locator)
+
+    await check(mock_page, {"type": "check", "value": "약관 동의"})
+
+    mock_locator.first.check.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_check_calls_uncheck_when_state_is_uncheck():
+    """state가 'uncheck'이면 locator.first.uncheck()를 호출하는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.uncheck = AsyncMock()
+    mock_page.get_by_label = MagicMock(return_value=mock_locator)
+
+    await check(mock_page, {"type": "check", "value": "뉴스레터", "state": "uncheck"})
+
+    mock_locator.first.uncheck.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_check_raises_on_invalid_state():
+    """state가 'check'/'uncheck'가 아니면 ValueError를 발생시키는지 확인한다."""
+    mock_page = AsyncMock()
+
+    with pytest.raises(ValueError, match="state는 'check' 또는 'uncheck'여야 합니다"):
+        await check(mock_page, {"type": "check", "value": "항목", "state": "toggle"})
+
+
+@pytest.mark.asyncio
+async def test_check_raises_when_all_locators_fail():
+    """모든 locator가 실패하면 RuntimeError를 발생시키는지 확인한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.first.check = AsyncMock(side_effect=Exception("not found"))
+    mock_page.get_by_label.return_value = mock_locator
+    mock_page.get_by_text.return_value = mock_locator
+    mock_page.locator.return_value = mock_locator
+
+    with pytest.raises(RuntimeError, match="체크박스/라디오를 찾을 수 없습니다"):
+        await check(mock_page, {"type": "check", "value": "없는항목"})

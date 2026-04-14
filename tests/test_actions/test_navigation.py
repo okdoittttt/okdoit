@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from core.actions.navigation import navigate, back
+from core.actions.navigation import navigate, back, refresh
 
 
 @pytest.mark.asyncio
@@ -40,6 +40,26 @@ async def test_back_calls_go_back():
     mock_page = AsyncMock()
     await back(mock_page, {"type": "back"})
     mock_page.go_back.assert_called_once_with(timeout=10_000)
+
+
+@pytest.mark.asyncio
+async def test_refresh_calls_reload():
+    """refresh가 page.reload()를 올바른 인자로 호출하는지 확인한다."""
+    mock_page = AsyncMock()
+    await refresh(mock_page, {"type": "refresh"})
+    mock_page.reload.assert_called_once_with(timeout=30_000, wait_until="domcontentloaded")
+
+
+@pytest.mark.asyncio
+async def test_refresh_propagates_playwright_timeout():
+    """page.reload()에서 발생한 예외가 그대로 전파되는지 확인한다."""
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+    mock_page = AsyncMock()
+    mock_page.reload.side_effect = PlaywrightTimeoutError("timeout")
+
+    with pytest.raises(PlaywrightTimeoutError):
+        await refresh(mock_page, {"type": "refresh"})
 
 
 @pytest.mark.asyncio
