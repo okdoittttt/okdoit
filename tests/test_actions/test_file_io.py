@@ -16,6 +16,8 @@ async def test_upload_file_calls_set_input_files(tmp_path):
     mock_locator = MagicMock()
     mock_locator.first.set_input_files = AsyncMock()
     mock_page.get_by_label = MagicMock(return_value=mock_locator)
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+    mock_page.locator = MagicMock(return_value=mock_locator)
 
     await upload_file(mock_page, {"type": "upload_file", "value": "파일 선택", "path": str(test_file)})
 
@@ -49,9 +51,9 @@ async def test_upload_file_raises_when_all_locators_fail(tmp_path):
     mock_page = AsyncMock()
     mock_locator = MagicMock()
     mock_locator.first.set_input_files = AsyncMock(side_effect=Exception("not found"))
-    mock_page.get_by_label.return_value = mock_locator
-    mock_page.get_by_text.return_value = mock_locator
-    mock_page.locator.return_value = mock_locator
+    mock_page.get_by_label = MagicMock(return_value=mock_locator)
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+    mock_page.locator = MagicMock(return_value=mock_locator)
 
     with pytest.raises(RuntimeError, match="파일 업로드 요소를 찾을 수 없습니다"):
         await upload_file(mock_page, {"type": "upload_file", "value": "없는버튼", "path": str(test_file)})
@@ -69,6 +71,8 @@ async def test_upload_multiple_files(tmp_path):
     mock_locator = MagicMock()
     mock_locator.first.set_input_files = AsyncMock()
     mock_page.get_by_label = MagicMock(return_value=mock_locator)
+    mock_page.get_by_text = MagicMock(return_value=mock_locator)
+    mock_page.locator = MagicMock(return_value=mock_locator)
 
     await upload_file(mock_page, {"type": "upload_file", "value": "파일 선택", "path": [str(file_a), str(file_b)]})
 
