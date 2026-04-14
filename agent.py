@@ -93,6 +93,35 @@ def _print_step(node_name: str, state: AgentState) -> None:
 
     elif node_name == "verify":
         print(f"[Verify]       반복 {state.get('iterations', 0)}회 / 최대 {MAX_LOOP_ITERATIONS}회")
+        plan_summary = _format_plan_summary(state.get("subtasks", []))
+        if plan_summary:
+            print(f"[Plan]         {plan_summary}")
+
+
+def _format_plan_summary(subtasks: list) -> str:
+    """subtasks를 한 줄 요약 문자열로 포맷한다.
+
+    Args:
+        subtasks: [{"description": str, "done": bool}, ...] 형태의 목록
+
+    Returns:
+        "✅ 1.단계1  ▶ 2.단계2  ⬜ 3.단계3" 형태의 문자열. 비어있으면 빈 문자열.
+    """
+    if not subtasks:
+        return ""
+
+    parts = []
+    current_marked = False
+    for i, task in enumerate(subtasks, 1):
+        short = task["description"][:12] + ("…" if len(task["description"]) > 12 else "")
+        if task["done"]:
+            parts.append(f"✅ {i}.{short}")
+        elif not current_marked:
+            parts.append(f"▶ {i}.{short}")
+            current_marked = True
+        else:
+            parts.append(f"⬜ {i}.{short}")
+    return "  ".join(parts)
 
 
 if __name__ == "__main__":

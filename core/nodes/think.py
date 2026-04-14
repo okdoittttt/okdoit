@@ -83,10 +83,10 @@ def _build_messages(state: AgentState) -> list:
             "type": "text",
             "text": (
                 f"목표: {state['task']}\n"
-                f"현재 URL: {state['current_url']}\n\n"
-                f"DOM 텍스트:\n{state['dom_text'] or '(없음)'}"
+                f"현재 URL: {state['current_url']}"
                 f"{plan_section}"
                 f"{error_section}"
+                f"\n\nDOM 텍스트:\n{state['dom_text'] or '(없음)'}"
                 f"{extracted_section}"
             ),
         }
