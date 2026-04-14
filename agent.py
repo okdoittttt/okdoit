@@ -1,8 +1,10 @@
 import argparse
 import asyncio
 import sys
+import uuid
 
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
 
 from core.browser import BrowserManager
 from core.graph import create_graph, initial_state
@@ -49,9 +51,16 @@ async def _run(task: str, manager: BrowserManager) -> None:
         state = initial_state(task)
         final: AgentState = state
 
+        session_id = str(uuid.uuid4())
+        run_config = RunnableConfig(
+            run_name="okdoit_agent_run",
+            tags=["agent"],
+            metadata={"task": task, "session_id": session_id},
+        )
+
         print(f"\n[태스크] {task}\n{'─' * 60}")
 
-        async for step in graph.astream(state):
+        async for step in graph.astream(state, config=run_config):
             for node_name, node_state in step.items():
                 final = node_state
                 _print_step(node_name, node_state)

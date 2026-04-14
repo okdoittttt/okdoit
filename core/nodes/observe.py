@@ -1,4 +1,6 @@
 from typing import Any
+
+from langsmith import traceable
 from playwright.async_api import Page
 
 from core.browser import BrowserManager
@@ -45,6 +47,7 @@ async def observe(state: AgentState) -> AgentState:
         return {**state, "error": f"[observe] Unexpected error: {e}"}
 
 
+@traceable(name="browser_extract_dom", tags=["browser", "observe"])
 async def _extract_structured_dom(page: Page) -> str:
     """페이지에서 구조화된 DOM 정보를 추출하고 포맷한다.
 

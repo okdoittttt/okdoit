@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable, Optional
 
+from langsmith import traceable
 from playwright.async_api import Page
 
 ActionHandler = Callable[[Page, dict], Awaitable[Optional[str]]]
@@ -34,6 +35,7 @@ class ActionRegistry:
 
         return decorator
 
+    @traceable(name="browser_action", tags=["browser", "action"])
     async def dispatch(self, page: Page, action: dict) -> Optional[str]:
         """액션 타입에 맞는 핸들러를 찾아 실행한다.
 

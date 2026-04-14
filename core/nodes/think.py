@@ -27,7 +27,18 @@ async def think(state: AgentState) -> AgentState:
     try:
         llm = build_llm()
         messages = _build_messages(state)
-        response = await llm.ainvoke(messages)
+        response = await llm.ainvoke(
+            messages,
+            config={
+                "run_name": "think_decide_action",
+                "tags": ["think", "llm"],
+                "metadata": {
+                    "task": state["task"],
+                    "iteration": state["iterations"],
+                    "current_url": state.get("current_url", ""),
+                },
+            },
+        )
         response_text = response.content if isinstance(response.content, str) else str(response.content)
 
         parsed = _parse_response(response_text)

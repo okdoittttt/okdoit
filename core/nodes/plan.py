@@ -30,7 +30,14 @@ async def plan(state: AgentState) -> AgentState:
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"목표: {state['task']}"),
         ]
-        response = await llm.ainvoke(messages)
+        response = await llm.ainvoke(
+            messages,
+            config={
+                "run_name": "plan_decompose",
+                "tags": ["plan", "llm"],
+                "metadata": {"task": state["task"]},
+            },
+        )
         response_text = response.content if isinstance(response.content, str) else str(response.content)
 
         subtasks = _parse_subtasks(response_text)
