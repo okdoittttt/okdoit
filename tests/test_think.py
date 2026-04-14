@@ -349,6 +349,42 @@ async def test_build_messages_includes_plan_section():
     assert "▶" in text
 
 
+def test_build_messages_includes_error_section():
+    """last_action_error가 있으면 [이전 액션 오류] 섹션이 포함되는지 확인한다."""
+    state = make_state(last_action_error="[act] 클릭할 요소를 찾을 수 없습니다: '버튼'")
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[이전 액션 오류]" in text
+    assert "[act] 클릭할 요소를 찾을 수 없습니다: '버튼'" in text
+    assert "다른 방법으로 동일한 목표를 달성하세요" in text
+
+
+def test_build_messages_no_error_section_when_none():
+    """last_action_error가 None이면 [이전 액션 오류] 섹션이 없는지 확인한다."""
+    state = make_state(last_action_error=None)
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[이전 액션 오류]" not in text
+
+
+@pytest.mark.asyncio
+async def test_think_clears_last_action_error():
+    """think 성공 시 last_action_error가 None으로 클리어되는지 확인한다."""
+    mock_llm = _make_llm_mock({
+        "thought": "다른 방법 시도",
+        "action": {"type": "navigate", "value": "https://example.com"},
+        "step_done": False,
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(last_action_error="[act] 클릭 실패"))
+
+    assert result["last_action_error"] is None
+
+
 # ── think() 통합 테스트 ────────────────────────────────────────────────────────
 
 @pytest.mark.integration

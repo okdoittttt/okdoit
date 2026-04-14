@@ -63,12 +63,12 @@ def test_should_continue_returns_end_when_is_done():
     assert _should_continue(make_state(is_done=True)) == END
 
 
-def test_should_continue_returns_end_when_error():
-    """error가 있으면 END를 반환한다."""
-    assert _should_continue(make_state(error="[act] 오류")) == END
+def test_should_continue_returns_observe_when_only_error():
+    """error만 있고 is_done=False이면 observe를 반환한다 (verify가 종료 판단을 전담)."""
+    assert _should_continue(make_state(error="[act] 오류")) == "observe"
 
 
-def test_should_continue_returns_end_when_both():
+def test_should_continue_returns_end_when_is_done_with_error():
     """is_done=True이고 error가 있어도 END를 반환한다."""
     assert _should_continue(make_state(is_done=True, error="오류")) == END
 
@@ -83,8 +83,9 @@ def test_create_graph_returns_compiled_graph():
 
 
 def test_create_graph_has_all_nodes():
-    """그래프에 4개 노드가 모두 등록되어 있는지 확인한다."""
+    """그래프에 5개 노드가 모두 등록되어 있는지 확인한다."""
     graph = create_graph()
+    assert "plan" in graph.nodes
     assert "observe" in graph.nodes
     assert "think" in graph.nodes
     assert "act" in graph.nodes
@@ -133,20 +134,29 @@ async def test_graph_runs_and_terminates_on_is_done(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_graph_terminates_on_error(tmp_path):
-    """observe에서 에러가 발생하면 루프가 종료되는지 확인한다."""
+async def test_graph_terminates_after_max_consecutive_errors(tmp_path):
+    """observe에서 에러가 MAX_CONSECUTIVE_ERRORS 이상 연속 발생하면 루프가 종료되는지 확인한다."""
+    from core.nodes.verify import MAX_CONSECUTIVE_ERRORS
+
+    mock_llm = _make_llm_mock({
+        "thought": "에러 복구 시도",
+        "action": {"type": "navigate", "value": "https://example.com"},
+        "is_done": False,
+        "result": None,
+    })
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(side_effect=RuntimeError("browser not started"))
 
     with (
         patch("core.nodes.observe.BrowserManager", return_value=mock_manager),
         patch("core.nodes.act.BrowserManager", return_value=mock_manager),
+        patch("core.nodes.plan.build_llm", return_value=mock_llm),
     ):
         graph = create_graph()
         result = await graph.ainvoke(initial_state("테스트"))
 
     assert result["is_done"] is True
-    assert result["error"] is not None
+    assert result["consecutive_errors"] >= MAX_CONSECUTIVE_ERRORS
 
 
 @pytest.mark.asyncio
