@@ -40,19 +40,7 @@ async def think(state: AgentState) -> AgentState:
                 },
             },
         )
-        if isinstance(response.content, str):
-            response_text = response.content
-        elif isinstance(response.content, list):
-            response_text = next(
-                (
-                    block["text"]
-                    for block in response.content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                ),
-                str(response.content),
-            )
-        else:
-            response_text = str(response.content)
+        response_text = llm.extract_text(response)
 
         parsed = _parse_response(response_text)
         if "error" in parsed:

@@ -39,7 +39,7 @@ async def plan(state: AgentState) -> AgentState:
                 "metadata": {"task": state["task"]},
             },
         )
-        response_text = response.content if isinstance(response.content, str) else str(response.content)
+        response_text = llm.extract_text(response)
 
         subtasks = _parse_subtasks(response_text)
         return {**state, "subtasks": subtasks}

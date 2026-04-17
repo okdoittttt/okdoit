@@ -65,8 +65,10 @@ def test_parse_subtasks_filters_empty_strings():
 async def test_plan_stores_subtasks_in_state():
     """LLM 응답으로 subtasks가 state에 저장되는지 확인한다."""
     steps = ["구글 이동", "검색어 입력", "결과 클릭"]
+    content = json.dumps(steps)
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps(steps)))
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    mock_llm.extract_text = MagicMock(return_value=content)
 
     with patch("core.nodes.plan.build_llm", return_value=mock_llm):
         result = await plan(make_state())
@@ -81,6 +83,7 @@ async def test_plan_returns_empty_subtasks_on_parse_failure():
     """LLM이 파싱 불가능한 응답을 반환하면 subtasks가 빈 리스트가 된다."""
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="파싱 불가 응답"))
+    mock_llm.extract_text = MagicMock(return_value="파싱 불가 응답")
 
     with patch("core.nodes.plan.build_llm", return_value=mock_llm):
         result = await plan(make_state())
@@ -106,8 +109,10 @@ async def test_plan_returns_empty_subtasks_on_llm_failure():
 async def test_plan_preserves_existing_state_fields():
     """plan 노드가 task, messages 등 기존 필드를 유지하는지 확인한다."""
     steps = ["단계1"]
+    content = json.dumps(steps)
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps(steps)))
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    mock_llm.extract_text = MagicMock(return_value=content)
 
     with patch("core.nodes.plan.build_llm", return_value=mock_llm):
         result = await plan(make_state(task="원래 목표", current_url="https://example.com"))

@@ -173,26 +173,26 @@ async def test_observe_dom_text_includes_page_title(tmp_path):
 @pytest.mark.asyncio
 async def test_trim_text_function_handles_long_content():
     """토큰 제한 로직이 긴 텍스트를 제대로 자르는지 확인한다."""
-    from core.nodes.observe import _trim_text
+    from core.nodes.observe import _apply_token_budget
 
     long_text = "A" * 10000
-    trimmed = _trim_text(long_text, max_chars=8000)
+    trimmed = _apply_token_budget(long_text, max_tokens=2000)  # max_chars = 8000
 
-    assert len(trimmed) <= 8100  # 약간의 여유 (중괄호, 마크 포함)
-    assert "...[중략]..." in trimmed
-    assert trimmed.startswith("A" * int(8000 * 0.6))
+    assert len(trimmed) <= 8100  # 약간의 여유 (생략 마크 포함)
+    assert "...(이하 생략됨)" in trimmed
+    assert trimmed.startswith("A" * 8000)
 
 
 @pytest.mark.asyncio
 async def test_trim_text_function_preserves_short_content():
     """토큰 제한 로직이 짧은 텍스트는 그대로 유지하는지 확인한다."""
-    from core.nodes.observe import _trim_text
+    from core.nodes.observe import _apply_token_budget
 
     short_text = "Hello World"
-    trimmed = _trim_text(short_text, max_chars=8000)
+    trimmed = _apply_token_budget(short_text, max_tokens=2000)
 
     assert trimmed == short_text
-    assert "...[중략]..." not in trimmed
+    assert "...(이하 생략됨)" not in trimmed
 
 
 @pytest.mark.asyncio

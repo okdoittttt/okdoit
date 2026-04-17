@@ -40,11 +40,14 @@ def test_ollama_provider_build_returns_chat_ollama():
 
 @pytest.mark.integration
 def test_factory_returns_ollama_when_provider_is_ollama():
-    """LLM_PROVIDER=ollama일 때 build_llm()이 ChatOllama를 반환하는지 확인한다."""
+    """LLM_PROVIDER=ollama일 때 build_llm()이 ChatOllama를 감싼 LLMAdapter를 반환하는지 확인한다."""
     from langchain_ollama import ChatOllama
 
+    from core.llm.adapter import LLMAdapter
+
     llm = build_llm()
-    assert isinstance(llm, ChatOllama)
+    assert isinstance(llm, LLMAdapter)
+    assert isinstance(llm._llm, ChatOllama)
 
 
 @pytest.mark.integration

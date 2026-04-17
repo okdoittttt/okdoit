@@ -136,11 +136,11 @@ def test_build_messages_includes_screenshot(tmp_path):
 # ── think() 단위 테스트 (LLM mock) ────────────────────────────────────────────
 
 def _make_llm_mock(response_json: dict) -> MagicMock:
-    """LLM mock을 생성한다."""
+    """LLMAdapter mock을 생성한다."""
+    content = json.dumps(response_json)
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content=json.dumps(response_json))
-    )
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    mock_llm.extract_text = MagicMock(return_value=content)
     return mock_llm
 
 
@@ -197,6 +197,7 @@ async def test_think_records_error_on_invalid_json():
     """LLM이 JSON이 아닌 응답을 반환하면 error 필드에 기록되는지 확인한다."""
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="이건 JSON이 아님"))
+    mock_llm.extract_text = MagicMock(return_value="이건 JSON이 아님")
 
     with patch("core.nodes.think.build_llm", return_value=mock_llm):
         result = await think(make_state())
@@ -383,6 +384,121 @@ async def test_think_clears_last_action_error():
         result = await think(make_state(last_action_error="[act] 클릭 실패"))
 
     assert result["last_action_error"] is None
+
+
+# ── Gemini 리스트 응답 처리 테스트 ───────────────────────────────────────────────
+
+def _make_gemini_llm_mock(content) -> MagicMock:
+    """Gemini 스타일 응답(content가 리스트)을 반환하는 LLMAdapter mock을 생성한다."""
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    extracted = (
+        next(
+            (b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"),
+            str(content),
+        )
+        if isinstance(content, list)
+        else content
+    )
+    mock_llm.extract_text = MagicMock(return_value=extracted)
+    return mock_llm
+
+
+@pytest.mark.asyncio
+async def test_think_handles_gemini_thinking_plus_text_list():
+    """Gemini 2.5 Pro처럼 content가 [thinking 블록, text 블록] 리스트일 때 text 블록을 추출해 파싱한다."""
+    action = {"type": "navigate", "value": "https://finance.naver.com"}
+    response_json = json.dumps({
+        "thought": "네이버 금융으로 이동한다",
+        "action": action,
+        "is_done": False,
+        "result": None,
+    })
+    content = [
+        {"type": "thinking", "thinking": "사용자가 네이버 금융으로 이동하길 원한다..."},
+        {"type": "text", "text": response_json},
+    ]
+    mock_llm = _make_gemini_llm_mock(content)
+
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result["error"] is None
+    assert result["last_action"] == json.dumps(action, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_think_handles_gemini_text_only_list():
+    """content가 [text 블록] 단독 리스트일 때도 정상 파싱한다."""
+    action = {"type": "click", "value": "삼성전자"}
+    response_json = json.dumps({
+        "thought": "삼성전자를 클릭한다",
+        "action": action,
+        "is_done": False,
+        "result": None,
+    })
+    content = [{"type": "text", "text": response_json}]
+    mock_llm = _make_gemini_llm_mock(content)
+
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result["error"] is None
+    assert result["last_action"] == json.dumps(action, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_think_handles_gemini_list_with_no_text_block():
+    """content 리스트에 text 블록이 없으면 error를 기록하고 반환한다."""
+    content = [{"type": "thinking", "thinking": "생각만 있고 응답 없음"}]
+    mock_llm = _make_gemini_llm_mock(content)
+
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result["error"] is not None
+    assert "[think]" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_think_handles_gemini_list_with_is_done():
+    """content가 리스트일 때 is_done=True와 result도 정상 처리된다."""
+    response_json = json.dumps({
+        "thought": "목표 달성",
+        "action": {"type": "wait", "value": 0},
+        "is_done": True,
+        "result": "게시글 5개 제목입니다.",
+    })
+    content = [
+        {"type": "thinking", "thinking": "작업이 완료됐다"},
+        {"type": "text", "text": response_json},
+    ]
+    mock_llm = _make_gemini_llm_mock(content)
+
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result["error"] is None
+    assert result["is_done"] is True
+    assert result["result"] == "게시글 5개 제목입니다."
+
+
+@pytest.mark.asyncio
+async def test_think_handles_gemini_list_with_code_fence():
+    """Gemini가 text 블록 안에 코드 펜스를 포함해도 정상 파싱한다."""
+    action = {"type": "scroll", "value": "down"}
+    response_json = f"```json\n{json.dumps({'thought': '스크롤', 'action': action, 'is_done': False, 'result': None})}\n```"
+    content = [
+        {"type": "thinking", "thinking": "스크롤이 필요하다"},
+        {"type": "text", "text": response_json},
+    ]
+    mock_llm = _make_gemini_llm_mock(content)
+
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result["error"] is None
+    assert result["last_action"] == json.dumps(action, ensure_ascii=False)
 
 
 # ── think() 통합 테스트 ────────────────────────────────────────────────────────

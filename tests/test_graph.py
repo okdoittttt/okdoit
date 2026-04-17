@@ -96,9 +96,9 @@ def test_create_graph_has_all_nodes():
 
 def _make_llm_mock(response_json: dict) -> MagicMock:
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content=json.dumps(response_json))
-    )
+    response_content = json.dumps(response_json)
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=response_content))
+    mock_llm.extract_text = MagicMock(side_effect=lambda resp: resp.content)
     return mock_llm
 
 
@@ -115,6 +115,8 @@ async def test_graph_runs_and_terminates_on_is_done(tmp_path):
     mock_page.url = "https://example.com"
     mock_page.evaluate = AsyncMock(return_value=[])
     mock_page.screenshot = AsyncMock()
+    mock_page.content = AsyncMock(return_value="<html><body></body></html>")
+    mock_page.title = AsyncMock(return_value="Test Page")
 
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
@@ -174,6 +176,8 @@ async def test_graph_terminates_on_max_iterations(tmp_path):
     mock_page.evaluate = AsyncMock(return_value=[])
     mock_page.screenshot = AsyncMock()
     mock_page.goto = AsyncMock()
+    mock_page.content = AsyncMock(return_value="<html><body></body></html>")
+    mock_page.title = AsyncMock(return_value="Test Page")
 
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
