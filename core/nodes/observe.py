@@ -1,13 +1,15 @@
 from typing import Any
 
+from bs4 import BeautifulSoup
 from langsmith import trace as ls_trace
+from markdownify import markdownify as md
 from playwright.async_api import Page
 
 from core.browser import BrowserManager
 from core.state import AgentState
 
-MAX_CHARS = 8000
-MAX_CLICKABLE_ELEMENTS = 30
+MAX_ELEMENTS = 50
+TOKEN_BUDGET = 2000
 
 
 async def observe(state: AgentState) -> AgentState:
@@ -50,8 +52,8 @@ async def observe(state: AgentState) -> AgentState:
 async def _extract_structured_dom(page: Page) -> str:
     """페이지에서 구조화된 DOM 정보를 추출하고 포맷한다.
 
-    페이지 메타데이터(title, url, description), 클릭 가능한 요소,
-    본문 텍스트를 수집하여 LLM이 이해하기 쉬운 형식으로 반환한다.
+    메타데이터, 클릭 가능한 요소, Markdown으로 변환된 본문을 수집하여
+    LLM이 이해하기 쉬운 형식으로 반환한다.
 
     Args:
         page: 정보를 추출할 Playwright 페이지 객체
@@ -66,226 +68,207 @@ async def _extract_structured_dom(page: Page) -> str:
             inputs={"url": url},
             tags=["browser", "observe"],
         ):
-            title = await page.title()
-            meta_description = await _get_meta_description(page)
-            clickable_elements = await _extract_clickable_elements(page)
-            page_content = await _extract_page_content(page)
-            trimmed_content = _trim_text(page_content)
-
-            dom_info = {
-                "title": title,
-                "url": url,
-                "meta_description": meta_description,
-                "clickable_elements": clickable_elements,
-                "page_content": trimmed_content,
-            }
-
-            return _format_dom_info(dom_info)
+            metadata = await _get_page_metadata(page)
+            elements = await _extract_clickable_elements(page)
+            content = await _extract_main_content(page)
+            budgeted_content = _apply_token_budget(content)
+            return _format_observation(metadata, elements, budgeted_content)
     except Exception as e:
         return f"[dom 추출 실패] {e}"
 
 
-async def _get_meta_description(page: Page) -> str:
-    """페이지의 meta description을 추출한다.
+async def _get_page_metadata(page: Page) -> dict[str, str]:
+    """페이지의 title, url, meta description을 반환한다.
 
     Args:
         page: 메타 정보를 추출할 Playwright 페이지 객체
 
     Returns:
-        meta name="description"의 content 속성값. 없으면 빈 문자열.
+        title, url, description 키를 포함한 딕셔너리.
+        description이 없으면 빈 문자열.
     """
+    title = await page.title()
+    url = page.url
     try:
-        description = await page.evaluate("""() => {
-            const meta = document.querySelector('meta[name="description"]');
-            return meta ? meta.getAttribute('content') : '';
-        }""")
-        return description or ""
+        description = await page.get_attribute('meta[name="description"]', "content") or ""
     except Exception:
-        return ""
+        description = ""
+    return {"title": title, "url": url, "description": description}
 
 
 async def _extract_clickable_elements(page: Page) -> list[dict[str, Any]]:
-    """클릭 가능한 요소들을 추출한다.
+    """클릭 가능한 인터랙티브 요소들을 추출한다.
 
-    button, a[href], input, select, textarea, [role='button'], [onclick]
-    선택자에 해당하는 보이는 요소들을 추출하며, 최대 MAX_CLICKABLE_ELEMENTS개까지만 반환한다.
+    화면에 보이는 button, a[href], input, select, textarea, role=button/link,
+    onclick 요소를 대상으로 하며 중복을 제거하고 최대 MAX_ELEMENTS개까지 반환한다.
 
     Args:
         page: 요소를 추출할 Playwright 페이지 객체
 
     Returns:
-        요소 정보 딕셔너리 리스트. 각 딕셔너리는 tag, text, type, placeholder, href, visible 포함.
+        index, tag, type, text, placeholder, href, name, aria_label을 담은
+        딕셔너리 리스트.
     """
     try:
-        elements: list[dict[str, Any]] = await page.evaluate("""() => {
-            const MAX_ELEMENTS = """ + str(MAX_CLICKABLE_ELEMENTS) + """;
+        elements: list[dict[str, Any]] = await page.evaluate(f"""() => {{
+            const MAX_ELEMENTS = {MAX_ELEMENTS};
             const results = [];
             const seen = new Set();
             const selectors = [
-                'button',
+                'button:not([disabled])',
                 'a[href]',
-                'input',
+                'input:not([type="hidden"])',
                 'select',
                 'textarea',
                 '[role="button"]',
+                '[role="link"]',
                 '[onclick]'
             ];
 
-            function getTextContent(el) {
-                const text = el.innerText || el.textContent || '';
-                return text.trim().slice(0, 50);
-            }
-
-            for (const selector of selectors) {
+            let index = 1;
+            for (const selector of selectors) {{
                 if (results.length >= MAX_ELEMENTS) break;
-                document.querySelectorAll(selector).forEach(el => {
+                document.querySelectorAll(selector).forEach(el => {{
                     if (results.length >= MAX_ELEMENTS) return;
                     if (seen.has(el)) return;
                     seen.add(el);
 
+                    if (el.offsetParent === null) return;
                     const rect = el.getBoundingClientRect();
-                    const isVisible = rect.height > 0 && rect.width > 0 &&
-                                     window.getComputedStyle(el).display !== 'none';
+                    if (rect.width <= 0) return;
 
-                    if (!isVisible) return;
-
-                    const info = {
+                    results.push({{
+                        index: index++,
                         tag: el.tagName.toLowerCase(),
-                        text: getTextContent(el),
                         type: el.type || null,
+                        text: el.innerText?.trim().slice(0, 80) || null,
                         placeholder: el.placeholder || null,
                         href: el.href || null,
-                        visible: true
-                    };
-                    results.push(info);
-                });
-            }
+                        name: el.name || null,
+                        aria_label: el.getAttribute('aria-label') || null
+                    }});
+                }});
+            }}
 
-            return results.slice(0, MAX_ELEMENTS);
-        }""")
+            return results;
+        }}""")
         return elements
     except Exception:
         return []
 
 
-async def _extract_page_content(page: Page) -> str:
-    """페이지의 본문 텍스트 내용을 추출한다.
+async def _extract_main_content(page: Page) -> str:
+    """HTML에서 노이즈를 제거한 뒤 Markdown으로 변환하여 반환한다.
 
-    헤딩, 단락, 리스트, 테이블, 라벨 등의 텍스트를 중복 제거하여 수집한다.
+    script/style/nav/footer 등 노이즈 태그와 광고/메뉴 클래스를 제거한 후
+    main > article > body 순으로 우선 추출하여 Markdown으로 변환한다.
 
     Args:
         page: 콘텐츠를 추출할 Playwright 페이지 객체
 
     Returns:
-        추출된 본문 텍스트 문자열. 실패 시 빈 문자열.
+        Markdown으로 변환된 본문 문자열. 실패 시 빈 문자열.
     """
     try:
-        content: str = await page.evaluate("""() => {
-            const MAX_TEXT_LEN = 500;
-            const seen = new Set();
-            const results = [];
+        html = await page.content()
+        soup = BeautifulSoup(html, "html.parser")
 
-            function addText(text) {
-                const trimmed = text.trim();
-                if (!trimmed || trimmed.length >= MAX_TEXT_LEN || seen.has(trimmed)) {
-                    return;
-                }
-                seen.add(trimmed);
-                results.push(trimmed);
-            }
+        remove_tags = [
+            "script", "style", "noscript", "head",
+            "nav", "footer", "aside", "iframe", "svg",
+        ]
+        for tag in remove_tags:
+            for el in soup.find_all(tag):
+                el.decompose()
 
-            // 헤딩
-            document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(el => {
-                addText(el.innerText);
-            });
+        remove_classes = [
+            "ad", "advertisement", "banner", "cookie",
+            "popup", "modal", "sidebar", "menu", "navbar",
+        ]
+        for cls in remove_classes:
+            for el in soup.find_all(class_=lambda c: c and cls in c.lower()):
+                el.decompose()
 
-            // 본문 텍스트
-            document.querySelectorAll('p, li, td, th, label, span, div').forEach(el => {
-                if (el.innerText && el.children.length === 0) {
-                    addText(el.innerText);
-                }
-            });
+        main = soup.find("main") or soup.find("article") or soup.find("body")
+        if main is None:
+            return ""
 
-            return results.join('\\n');
-        }""")
-        return content or ""
+        markdown = md(str(main), heading_style="ATX", bullets="-")
+        lines = [line for line in markdown.splitlines() if line.strip()]
+        return "\n".join(lines)
     except Exception:
         return ""
 
 
-def _trim_text(text: str, max_chars: int = MAX_CHARS) -> str:
-    """텍스트 길이를 제한하고 중간 부분을 생략 표시한다.
+def _apply_token_budget(text: str, max_tokens: int = TOKEN_BUDGET) -> str:
+    """텍스트를 토큰 예산 내로 제한한다.
 
-    최대 문자 수를 초과하는 경우, 앞부분(60%) + 뒷부분(40%)을 유지하고
-    중간에 "[중략]" 표시를 삽입한다.
+    1 토큰 ≈ 4글자 근사식을 사용하여 초과 시 앞부분을 유지하고 생략 표시를 추가한다.
 
     Args:
         text: 원본 텍스트 문자열
-        max_chars: 최대 허용 문자 수. 기본값 8000.
+        max_tokens: 최대 허용 토큰 수. 기본값 2000.
 
     Returns:
-        제한된 길이의 텍스트 문자열.
+        제한된 텍스트 문자열.
     """
+    max_chars = max_tokens * 4
     if len(text) <= max_chars:
         return text
-
-    head_size = int(max_chars * 0.6)
-    tail_size = int(max_chars * 0.4)
-
-    head = text[:head_size]
-    tail = text[-tail_size:]
-
-    return f"{head}\n...[중략]...\n{tail}"
+    return text[:max_chars] + "\n...(이하 생략됨)"
 
 
-def _format_dom_info(dom_info: dict[str, Any]) -> str:
-    """구조화된 DOM 정보를 포맷된 문자열로 변환한다.
+def _format_observation(
+    metadata: dict[str, str],
+    elements: list[dict[str, Any]],
+    content: str,
+) -> str:
+    """관찰 결과를 LLM 입력용 포맷 문자열로 변환한다.
 
     Args:
-        dom_info: title, url, meta_description, clickable_elements, page_content 포함 딕셔너리
+        metadata: title, url, description을 담은 딕셔너리
+        elements: 클릭 가능한 요소 딕셔너리 리스트
+        content: 토큰 예산이 적용된 Markdown 본문
 
     Returns:
-        포맷된 DOM 정보 문자열.
+        [Page Info] / [Clickable Elements] / [Page Content] 섹션으로 구성된 문자열.
     """
-    sections = []
+    sections: list[str] = []
 
-    # [Page Info] 섹션
     sections.append("[Page Info]")
-    sections.append(f"Title: {dom_info.get('title', 'N/A')}")
-    sections.append(f"URL: {dom_info.get('url', 'N/A')}")
-    if dom_info.get("meta_description"):
-        sections.append(f"Description: {dom_info['meta_description']}")
+    sections.append(f"Title: {metadata.get('title', 'N/A')}")
+    sections.append(f"URL: {metadata.get('url', 'N/A')}")
+    if metadata.get("description"):
+        sections.append(f"Description: {metadata['description']}")
     sections.append("")
 
-    # [Clickable Elements] 섹션
     sections.append("[Clickable Elements]")
-    clickable = dom_info.get("clickable_elements", [])
-    if clickable:
-        for idx, elem in enumerate(clickable, 1):
+    if elements:
+        for elem in elements:
             tag = elem.get("tag", "unknown")
-            text = elem.get("text", "")
             elem_type = elem.get("type")
+            text = elem.get("text") or ""
             placeholder = elem.get("placeholder")
             href = elem.get("href")
+            aria_label = elem.get("aria_label")
 
-            # 요소 설명 구성
-            parts = [f"[{tag}]"]
-            if text:
-                parts.append(text)
-            if elem_type:
-                parts.append(f"type={elem_type}")
+            tag_str = f"[{tag}/{elem_type}]" if elem_type else f"[{tag}]"
+            display_text = text if text else (aria_label or "")
+
+            parts = [tag_str]
+            if display_text:
+                parts.append(display_text)
             if placeholder:
-                parts.append(f"placeholder={placeholder}")
+                parts.append(f'placeholder="{placeholder}"')
             if href:
                 parts.append(f"→ {href}")
 
-            sections.append(f"{idx}. {' '.join(parts)}")
+            sections.append(" ".join(parts))
     else:
         sections.append("(No clickable elements found)")
     sections.append("")
 
-    # [Page Content] 섹션
     sections.append("[Page Content]")
-    sections.append(dom_info.get("page_content", "(No content found)"))
+    sections.append(content or "(No content found)")
 
     return "\n".join(sections)

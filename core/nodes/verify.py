@@ -1,6 +1,6 @@
 from core.state import AgentState
 
-MAX_LOOP_ITERATIONS = 200
+MAX_LOOP_ITERATIONS = 20
 MAX_CONSECUTIVE_ERRORS = 3
 
 

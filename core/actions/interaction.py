@@ -5,6 +5,7 @@ from typing import Optional
 from playwright.async_api import Page
 
 from core.actions._registry import registry
+from core.browser import BrowserManager
 
 _MAX_WAIT_SECONDS = 10.0
 _MAX_WAIT_ELEMENT_SECONDS = 30.0
@@ -12,11 +13,15 @@ _DEFAULT_ELEMENT_TIMEOUT_SECONDS = 15.0
 _VALID_CHECK_STATES = frozenset({"check", "uncheck"})
 
 
+_NEW_TAB_WAIT_MS = 800
+
+
 @registry.register("click")
 async def click(page: Page, action: dict) -> None:
     """target 텍스트로 요소를 찾아 클릭한다.
 
     get_by_text → get_by_role → locator 순서로 시도한다.
+    클릭 후 새 탭이 열리면 BrowserManager의 활성 페이지를 새 탭으로 전환한다.
 
     Args:
         page: 현재 Playwright 페이지
@@ -31,8 +36,17 @@ async def click(page: Page, action: dict) -> None:
         page.locator(target),
     ]:
         try:
+            pages_before = list(page.context.pages)
             await locator.first.click(timeout=timeout)
-            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(_NEW_TAB_WAIT_MS)
+
+            new_pages = [p for p in page.context.pages if p not in pages_before]
+            if new_pages:
+                new_page = new_pages[-1]
+                await new_page.wait_for_load_state("domcontentloaded")
+                BrowserManager()._page = new_page
+            else:
+                await page.wait_for_load_state("domcontentloaded")
             return
         except Exception:
             continue
