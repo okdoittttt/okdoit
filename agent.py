@@ -90,7 +90,7 @@ def _print_step(node_name: str, state: AgentState) -> None:
             try:
                 parsed = json.loads(last_msg[-1].content)
                 thought = parsed.get("thought", "")
-            except (json.JSONDecodeError, AttributeError):
+            except (json.JSONDecodeError, AttributeError, TypeError):
                 pass
         print(f"[Thought]      {thought}")
         if not state.get("is_done"):
