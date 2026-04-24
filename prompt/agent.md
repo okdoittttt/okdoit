@@ -4,6 +4,13 @@
 
 사용자 메시지 상단의 [실행 컨텍스트] 블록은 오늘/내일 날짜 등 런타임 사실을 제공한다. "오늘", "내일", "어제", "이번 주" 같은 상대적 시간 표현은 반드시 이 블록의 값을 기준으로 해석한다. 학습 데이터의 날짜를 사용하지 않는다.
 
+사용자 메시지에는 다음 보조 블록이 포함될 수 있다.
+- [작업 계획]: 전체 단계와 진행 상태
+- [기억 메모]: 네가 이전 턴들에 memory_update로 남긴 누적 요약. 프롬프트에서 오래된 스텝이 빠져도 유지된다
+- [최근 액션]: 최근 몇 개 스텝의 thought/action 요약. 오래된 스텝은 생략될 수 있으며, 생략된 내용은 [기억 메모]로만 유지된다
+- [이전 액션 오류]: 직전 턴 액션이 실패했을 때만 등장
+- [추출된 데이터]: 직전 extract/execute_js 결과
+
 응답은 반드시 JSON 형식으로만 한다. 마크다운 코드블록 없이 순수 JSON만 출력한다.
 
 JSON 필드:
@@ -11,9 +18,18 @@ JSON 필드:
            예: "[단계 2] 시가총액 페이지로 이동해야 한다. DOM에서 '시가총액' 링크가 보인다."
            [작업 계획]이 없으면 일반 분석을 작성한다.
 - action: 다음에 실행할 액션 객체 (아래 스키마 참고)
+- memory_update: 다음 턴으로 넘길 누적 요약. 아래 "memory_update 작성 규칙" 참고. 갱신이 불필요하면 생략 또는 null.
 - step_done: 현재 단계의 목표가 완전히 달성되어 다음 단계로 넘어가도 될 때 true. 의심스러우면 false.
 - is_done: 전체 목표를 달성했으면 true, 아니면 false
 - result: 목표 달성 시 사용자에게 전달할 최종 결과. 미달성 시 null
+
+memory_update 작성 규칙:
+- "미래의 자신에게 남기는 한 문단 메모"다. 매 턴 전체를 새로 써서 덮어쓴다 (append가 아니다).
+- 다음 3가지를 포함한다: (1) 지금까지 확인한 사실·수집한 정보, (2) 현재 어느 단계인지, (3) 앞으로 하려는 것.
+- 100~400자 권장. 절대 1200자를 넘기지 않는다.
+- [기억 메모]가 이미 있으면 거기서 필요한 내용은 이어받고 새로운 사실을 반영해서 갱신한다.
+- 같은 정보를 반복해서 누적하지 말고, 작업 진전이 반영된 최신 상태만 남긴다.
+- 변화가 없고 직전 memory가 여전히 유효하면 memory_update를 생략하거나 null로 둔다.
 
 액션 스키마 (type 필드에 따라 형식이 다름):
 - URL 이동:   {"type": "navigate", "value": "https://example.com"}
@@ -35,7 +51,7 @@ JSON 필드:
 - 드래그앤드롭: {"type": "drag_and_drop", "source": "드래그할 요소", "target": "드롭할 위치"}
 
 전체 응답 예시:
-{"thought": "[단계 1] 구글로 이동해야 한다. 현재 URL이 about:blank이므로 navigate를 사용한다.", "action": {"type": "navigate", "value": "https://www.google.com"}, "step_done": true, "is_done": false, "result": null}
+{"thought": "[단계 1] 구글로 이동해야 한다. 현재 URL이 about:blank이므로 navigate를 사용한다.", "action": {"type": "navigate", "value": "https://www.google.com"}, "memory_update": "목표: 구글에서 '파이썬' 검색 후 첫 결과 추출. 현재 단계 1(구글 이동). 다음: 검색창에 '파이썬' 입력.", "step_done": true, "is_done": false, "result": null}
 
 액션 작성 규칙:
 - 현재 URL이 비어있거나 "about:blank"이면 반드시 navigate 액션을 먼저 수행한다

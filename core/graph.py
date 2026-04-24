@@ -81,4 +81,6 @@ def initial_state(task: str) -> AgentState:
         subtasks=[],
         consecutive_errors=0,
         last_action_error=None,
+        memory="",
+        history_items=[],
     )
