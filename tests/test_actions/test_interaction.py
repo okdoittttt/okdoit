@@ -3,8 +3,20 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from core.actions.interaction import (
+    check,
+    click,
+    drag_and_drop,
+    execute_js,
+    extract,
+    hover,
+    press,
+    type_text,
+    wait,
+    wait_for_element,
+)
 from core.actions.navigation import scroll
-from core.actions.interaction import wait, click, type_text, press, hover, wait_for_element, check, extract, execute_js, drag_and_drop
+from core.actions.result import ActionErrorCode, ActionResult
 
 
 @pytest.mark.asyncio
@@ -195,12 +207,16 @@ async def test_check_calls_uncheck_when_state_is_uncheck():
 
 
 @pytest.mark.asyncio
-async def test_check_raises_on_invalid_state():
-    """state가 'check'/'uncheck'가 아니면 ValueError를 발생시키는지 확인한다."""
+async def test_check_returns_invalid_argument_on_invalid_state():
+    """state가 'check'/'uncheck'가 아니면 ActionResult.fail(INVALID_ARGUMENT)을 반환한다."""
     mock_page = AsyncMock()
 
-    with pytest.raises(ValueError, match="state는 'check' 또는 'uncheck'여야 합니다"):
-        await check(mock_page, {"type": "check", "value": "항목", "state": "toggle"})
+    result = await check(mock_page, {"type": "check", "value": "항목", "state": "toggle"})
+
+    assert isinstance(result, ActionResult)
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
+    assert "'toggle'" in (result.error_message or "")
 
 
 @pytest.mark.asyncio
@@ -219,18 +235,19 @@ async def test_check_raises_when_all_locators_fail():
 
 @pytest.mark.asyncio
 async def test_extract_returns_text_via_css_selector():
-    """CSS 선택자로 요소 텍스트를 추출해서 반환하는지 확인한다."""
+    """CSS 선택자로 요소 텍스트를 추출해서 ActionResult.ok(extracted=...)로 반환한다."""
     mock_page = AsyncMock()
     mock_page.evaluate = AsyncMock(return_value="추출된 텍스트")
 
     result = await extract(mock_page, {"type": "extract", "value": "h1"})
 
-    assert result == "추출된 텍스트"
+    assert result.success is True
+    assert result.extracted == "추출된 텍스트"
 
 
 @pytest.mark.asyncio
 async def test_extract_falls_back_to_get_by_text():
-    """evaluate가 None을 반환하면 get_by_text로 폴백하는지 확인한다."""
+    """evaluate가 None을 반환하면 get_by_text로 폴백한다."""
     mock_page = AsyncMock()
     mock_page.evaluate = AsyncMock(return_value=None)
     mock_locator = MagicMock()
@@ -239,7 +256,8 @@ async def test_extract_falls_back_to_get_by_text():
 
     result = await extract(mock_page, {"type": "extract", "value": "제목"})
 
-    assert result == "텍스트 기반 추출"
+    assert result.success is True
+    assert result.extracted == "텍스트 기반 추출"
 
 
 @pytest.mark.asyncio
@@ -257,25 +275,27 @@ async def test_extract_raises_when_nothing_found():
 
 @pytest.mark.asyncio
 async def test_execute_js_returns_result():
-    """JS 실행 결과를 문자열로 반환하는지 확인한다."""
+    """JS 실행 결과를 ActionResult.ok(extracted=str)로 반환한다."""
     mock_page = AsyncMock()
     mock_page.evaluate = AsyncMock(return_value="https://example.com")
 
     result = await execute_js(mock_page, {"type": "execute_js", "value": "return location.href"})
 
-    assert result == "https://example.com"
+    assert result.success is True
+    assert result.extracted == "https://example.com"
     mock_page.evaluate.assert_called_once_with("return location.href")
 
 
 @pytest.mark.asyncio
 async def test_execute_js_returns_empty_string_when_none():
-    """JS 결과가 None이면 빈 문자열을 반환하는지 확인한다."""
+    """JS 결과가 None이면 extracted가 빈 문자열이다."""
     mock_page = AsyncMock()
     mock_page.evaluate = AsyncMock(return_value=None)
 
     result = await execute_js(mock_page, {"type": "execute_js", "value": "console.log('hi')"})
 
-    assert result == ""
+    assert result.success is True
+    assert result.extracted == ""
 
 
 @pytest.mark.asyncio

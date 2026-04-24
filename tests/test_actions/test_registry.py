@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from core.actions import ActionRegistry
+from core.actions.result import ActionErrorCode, ActionResult
 
 
 @pytest.fixture
@@ -29,13 +30,83 @@ async def test_register_and_dispatch(fresh_registry):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_unknown_type_raises_value_error(fresh_registry):
-    """등록되지 않은 타입을 dispatch하면 ValueError가 발생하는지 확인한다."""
+async def test_dispatch_unknown_type_returns_invalid_argument(fresh_registry):
+    """등록되지 않은 타입은 예외가 아닌 ActionResult.fail(INVALID_ARGUMENT)로 돌아온다."""
     mock_page = AsyncMock()
     action = {"type": "unknown_xyz"}
 
-    with pytest.raises(ValueError, match=r"\[act\].*unknown_xyz"):
-        await fresh_registry.dispatch(mock_page, action)
+    result = await fresh_registry.dispatch(mock_page, action)
+
+    assert isinstance(result, ActionResult)
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
+    assert "unknown_xyz" in (result.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_missing_type_returns_invalid_argument(fresh_registry):
+    """type 필드 자체가 없어도 ActionResult.fail(INVALID_ARGUMENT)."""
+    mock_page = AsyncMock()
+
+    result = await fresh_registry.dispatch(mock_page, {})
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
+
+
+@pytest.mark.asyncio
+async def test_dispatch_normalizes_none_return_to_ok(fresh_registry):
+    """핸들러가 None을 반환하면 ActionResult.ok()로 정규화된다(호환성)."""
+
+    @fresh_registry.register("legacy_none")
+    async def handler(page, action):
+        return None
+
+    result = await fresh_registry.dispatch(AsyncMock(), {"type": "legacy_none"})
+    assert result.success is True
+    assert result.extracted is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_normalizes_str_return_to_extracted(fresh_registry):
+    """핸들러가 str을 반환하면 ActionResult.ok(extracted=str)로 정규화된다."""
+
+    @fresh_registry.register("legacy_str")
+    async def handler(page, action):
+        return "hello"
+
+    result = await fresh_registry.dispatch(AsyncMock(), {"type": "legacy_str"})
+    assert result.success is True
+    assert result.extracted == "hello"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_passes_through_action_result(fresh_registry):
+    """핸들러가 ActionResult를 반환하면 그대로 전달된다."""
+
+    @fresh_registry.register("native")
+    async def handler(page, action):
+        return ActionResult.fail(ActionErrorCode.TIMEOUT, "직접 fail")
+
+    result = await fresh_registry.dispatch(AsyncMock(), {"type": "native"})
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.TIMEOUT
+    assert result.error_message == "직접 fail"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_converts_exception_to_fail(fresh_registry):
+    """핸들러가 예외를 던지면 ActionResult.from_exception으로 변환된다."""
+
+    @fresh_registry.register("boom")
+    async def handler(page, action):
+        raise RuntimeError("클릭할 요소를 찾을 수 없습니다: '버튼'")
+
+    result = await fresh_registry.dispatch(AsyncMock(), {"type": "boom"})
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.ELEMENT_NOT_FOUND
+    assert "버튼" in (result.error_message or "")
+    assert result.recovery_hint is not None  # 기본 힌트 주입
 
 
 def test_register_returns_original_function(fresh_registry):

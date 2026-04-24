@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.actions.file_io import upload_file
+from core.actions.result import ActionErrorCode, ActionResult
 
 
 @pytest.mark.asyncio
@@ -25,21 +26,34 @@ async def test_upload_file_calls_set_input_files(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_upload_file_raises_when_file_not_exists():
-    """존재하지 않는 파일 경로를 지정하면 ValueError를 발생시키는지 확인한다."""
+async def test_upload_file_returns_invalid_argument_when_file_not_exists():
+    """존재하지 않는 파일 경로는 ActionResult.fail(INVALID_ARGUMENT)를 반환한다."""
     mock_page = AsyncMock()
 
-    with pytest.raises(ValueError, match="파일이 존재하지 않습니다"):
-        await upload_file(mock_page, {"type": "upload_file", "value": "파일 선택", "path": "/not/exist/file.pdf"})
+    result = await upload_file(
+        mock_page,
+        {"type": "upload_file", "value": "파일 선택", "path": "/not/exist/file.pdf"},
+    )
+
+    assert isinstance(result, ActionResult)
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
+    assert "파일이 존재하지 않습니다" in (result.error_message or "")
 
 
 @pytest.mark.asyncio
-async def test_upload_file_raises_when_path_is_empty_list():
-    """path가 빈 리스트이면 ValueError를 발생시키는지 확인한다."""
+async def test_upload_file_returns_invalid_argument_when_path_is_empty_list():
+    """path가 빈 리스트이면 ActionResult.fail(INVALID_ARGUMENT)를 반환한다."""
     mock_page = AsyncMock()
 
-    with pytest.raises(ValueError, match="path가 비어있습니다"):
-        await upload_file(mock_page, {"type": "upload_file", "value": "파일 선택", "path": []})
+    result = await upload_file(
+        mock_page,
+        {"type": "upload_file", "value": "파일 선택", "path": []},
+    )
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
+    assert "비어있습니다" in (result.error_message or "")
 
 
 @pytest.mark.asyncio

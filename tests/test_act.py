@@ -167,6 +167,83 @@ async def test_act_skips_when_is_done():
     assert result["iterations"] == 2
 
 
+# ── last_action_result 필드 검증 ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_act_records_success_last_action_result():
+    """성공한 액션의 last_action_result는 success=True, error_code=None이다."""
+    mock_page = AsyncMock()
+    mock_manager = MagicMock()
+    mock_manager.get_page = AsyncMock(return_value=mock_page)
+
+    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+        result = await act(make_state(
+            last_action=json.dumps({"type": "navigate", "value": "https://example.com"}),
+        ))
+
+    lar = result["last_action_result"]
+    assert lar is not None
+    assert lar["success"] is True
+    assert lar["error_code"] is None
+    assert lar["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_act_records_failure_with_error_code():
+    """실패한 액션의 last_action_result는 분류된 error_code와 복구 힌트를 담는다."""
+    mock_page = AsyncMock()
+    mock_page.goto = AsyncMock(side_effect=RuntimeError("클릭할 요소를 찾을 수 없습니다: '버튼'"))
+    mock_manager = MagicMock()
+    mock_manager.get_page = AsyncMock(return_value=mock_page)
+
+    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+        result = await act(make_state(
+            last_action=json.dumps({"type": "navigate", "value": "https://example.com"}),
+        ))
+
+    lar = result["last_action_result"]
+    assert lar["success"] is False
+    assert lar["error_code"] == "element_not_found"
+    assert lar["recovery_hint"] is not None
+    # error 문자열에 error_code와 복구 힌트가 포함된다
+    assert "error_code: element_not_found" in result["error"]
+    assert "복구 힌트:" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_act_parse_error_records_invalid_argument():
+    """JSON 파싱 실패는 INVALID_ARGUMENT로 기록된다."""
+    mock_page = AsyncMock()
+    mock_manager = MagicMock()
+    mock_manager.get_page = AsyncMock(return_value=mock_page)
+
+    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+        result = await act(make_state(last_action="이건 JSON 아님"))
+
+    lar = result["last_action_result"]
+    assert lar["success"] is False
+    assert lar["error_code"] == "invalid_argument"
+
+
+@pytest.mark.asyncio
+async def test_act_extract_sets_extracted_result():
+    """성공한 extract는 extracted_result를 채우고 last_action_result.extracted도 담는다."""
+    mock_page = AsyncMock()
+    mock_page.evaluate = AsyncMock(return_value="추출된 내용")
+    mock_manager = MagicMock()
+    mock_manager.get_page = AsyncMock(return_value=mock_page)
+
+    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+        result = await act(make_state(
+            last_action=json.dumps({"type": "extract", "value": "h1"}),
+        ))
+
+    assert result["error"] is None
+    assert result["extracted_result"] == "추출된 내용"
+    assert result["last_action_result"]["extracted"] == "추출된 내용"
+
+
 # ── act() 통합 테스트 ──────────────────────────────────────────────────────────
 
 @pytest.mark.integration
