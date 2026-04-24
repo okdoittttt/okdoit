@@ -8,7 +8,10 @@ from core.nodes.verify import (
     LOOP_WARN_THRESHOLD,
     MAX_CONSECUTIVE_ERRORS,
     MAX_LOOP_ITERATIONS,
+    SUBTASK_STUCK_ITER_THRESHOLD,
     _action_signature,
+    _apply_subtask_tracking,
+    _current_subtask_index,
     _detect_loop,
     _update_action_history,
     verify,
@@ -31,6 +34,10 @@ def make_state(**kwargs) -> AgentState:
         "consecutive_errors": 0,
         "last_action_error": None,
         "action_history": [],
+        "subtasks": [],
+        "plan_stale": False,
+        "subtask_start_iter": 0,
+        "prev_active_subtask": -1,
     }
     return {**base, **kwargs}
 
@@ -366,3 +373,135 @@ async def test_verify_handles_non_json_last_action_gracefully():
     ))
     assert result["is_done"] is False
     assert result["action_history"] == ["click:A"]  # 변경 없음
+
+
+# ── _current_subtask_index / _apply_subtask_tracking 단위 테스트 ──────────────
+
+
+def test_current_subtask_index_returns_first_incomplete():
+    state = make_state(subtasks=[
+        {"description": "a", "done": True},
+        {"description": "b", "done": False},
+        {"description": "c", "done": False},
+    ])
+    assert _current_subtask_index(state) == 1
+
+
+def test_current_subtask_index_none_when_all_done():
+    state = make_state(subtasks=[
+        {"description": "a", "done": True},
+        {"description": "b", "done": True},
+    ])
+    assert _current_subtask_index(state) is None
+
+
+def test_current_subtask_index_none_when_empty():
+    state = make_state(subtasks=[])
+    assert _current_subtask_index(state) is None
+
+
+def test_apply_subtask_tracking_updates_start_iter_on_first_active():
+    """active subtask가 처음 등장하면 start_iter가 현재 iterations로 설정된다."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        iterations=4,
+        prev_active_subtask=-1,
+        subtask_start_iter=0,
+    )
+    start_iter, prev_active, stuck = _apply_subtask_tracking(state)
+    assert start_iter == 4
+    assert prev_active == 0
+    assert stuck is False
+
+
+def test_apply_subtask_tracking_preserves_start_iter_when_not_transitioned():
+    """active subtask가 그대로면 start_iter도 그대로 유지된다."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        iterations=10,
+        prev_active_subtask=0,
+        subtask_start_iter=4,
+    )
+    start_iter, prev_active, _ = _apply_subtask_tracking(state)
+    assert start_iter == 4
+    assert prev_active == 0
+
+
+def test_apply_subtask_tracking_signals_plan_stale_on_stuck():
+    """한 subtask에 SUBTASK_STUCK_ITER_THRESHOLD 이상 머물면 stuck=True."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        iterations=4 + SUBTASK_STUCK_ITER_THRESHOLD,
+        prev_active_subtask=0,
+        subtask_start_iter=4,
+    )
+    _, _, stuck = _apply_subtask_tracking(state)
+    assert stuck is True
+
+
+def test_apply_subtask_tracking_does_not_signal_below_threshold():
+    """임계값 미만이면 stuck 신호 없음."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        iterations=4 + SUBTASK_STUCK_ITER_THRESHOLD - 1,
+        prev_active_subtask=0,
+        subtask_start_iter=4,
+    )
+    _, _, stuck = _apply_subtask_tracking(state)
+    assert stuck is False
+
+
+def test_apply_subtask_tracking_no_active_subtask_no_signal():
+    """모든 subtask가 done이면 stuck 판정도 없다."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": True}],
+        iterations=100,
+        prev_active_subtask=0,
+        subtask_start_iter=0,
+    )
+    _, prev_active, stuck = _apply_subtask_tracking(state)
+    assert stuck is False
+    assert prev_active == -1  # active 없음
+
+
+# ── verify가 stuck 감지로 plan_stale=True를 세팅하는지 통합 테스트 ─────────────
+
+
+@pytest.mark.asyncio
+async def test_verify_marks_plan_stale_when_stuck():
+    """stuck 임계값을 넘긴 상태에서 verify가 plan_stale=True를 세팅한다."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        iterations=2 + SUBTASK_STUCK_ITER_THRESHOLD,
+        prev_active_subtask=0,
+        subtask_start_iter=2,
+    )
+    result = await verify(state)
+    assert result.get("plan_stale") is True
+    assert result["is_done"] is False
+
+
+@pytest.mark.asyncio
+async def test_verify_resets_subtask_start_on_transition():
+    """subtask가 전환되면 subtask_start_iter가 갱신된다."""
+    state = make_state(
+        subtasks=[
+            {"description": "a", "done": True},
+            {"description": "b", "done": False},
+        ],
+        iterations=6,
+        prev_active_subtask=0,  # 직전 active는 0이었지만 이제 1로 전환
+        subtask_start_iter=0,
+    )
+    result = await verify(state)
+    assert result["subtask_start_iter"] == 6
+    assert result["prev_active_subtask"] == 1
+    assert result.get("plan_stale", False) is False
+
+
+@pytest.mark.asyncio
+async def test_verify_does_not_mark_plan_stale_when_no_subtasks():
+    """subtasks가 비어 있으면 stuck 신호 없음."""
+    state = make_state(subtasks=[], iterations=100)
+    result = await verify(state)
+    assert result.get("plan_stale", False) is False

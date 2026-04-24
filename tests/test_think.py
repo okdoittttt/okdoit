@@ -761,6 +761,55 @@ async def test_think_preserves_memory_when_memory_update_is_null():
     assert result["memory"] == "유지되어야 함"
 
 
+# ── plan_stale 파싱 테스트 ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_think_propagates_plan_stale_true():
+    """LLM이 plan_stale=true를 응답하면 state로 전파된다."""
+    mock_llm = _make_llm_mock({
+        "thought": "현재 계획이 부적절",
+        "action": {"type": "wait", "value": 1},
+        "plan_stale": True,
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state())
+
+    assert result.get("plan_stale") is True
+
+
+@pytest.mark.asyncio
+async def test_think_does_not_overwrite_existing_plan_stale_true():
+    """plan_stale 필드를 응답에 안 넣어도 기존 True가 유지된다(verify 신호 보존)."""
+    mock_llm = _make_llm_mock({
+        "thought": "정상 진행",
+        "action": {"type": "wait", "value": 1},
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(plan_stale=True))
+
+    assert result.get("plan_stale") is True
+
+
+@pytest.mark.asyncio
+async def test_think_plan_stale_default_false():
+    """기본 응답에는 plan_stale 키가 없거나 False여야 한다(verify의 patch가 그 위에 덮어쓰기 가능)."""
+    mock_llm = _make_llm_mock({
+        "thought": "정상 진행",
+        "action": {"type": "wait", "value": 1},
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(plan_stale=False))
+
+    assert result.get("plan_stale", False) is False
+
+
 # ── think() 통합 테스트 ────────────────────────────────────────────────────────
 
 @pytest.mark.integration

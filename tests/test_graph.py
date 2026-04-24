@@ -6,7 +6,14 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
-from core.graph import _should_continue, create_graph, initial_state
+from core.graph import (
+    MAX_REPLANS,
+    _route_after_verify,
+    _should_continue,
+    _should_replan,
+    create_graph,
+    initial_state,
+)
 from core.nodes.verify import MAX_LOOP_ITERATIONS
 from core.state import AgentState
 
@@ -83,13 +90,63 @@ def test_create_graph_returns_compiled_graph():
 
 
 def test_create_graph_has_all_nodes():
-    """그래프에 5개 노드가 모두 등록되어 있는지 확인한다."""
+    """그래프에 6개 노드가 모두 등록되어 있는지 확인한다."""
     graph = create_graph()
     assert "plan" in graph.nodes
     assert "observe" in graph.nodes
     assert "think" in graph.nodes
     assert "act" in graph.nodes
     assert "verify" in graph.nodes
+    assert "replan" in graph.nodes
+
+
+# ── _should_replan / _route_after_verify 단위 테스트 ─────────────────────────
+
+
+def test_should_replan_false_by_default():
+    """plan_stale=False, subtasks가 없거나 진행 중이면 replan 안 한다."""
+    state = make_state(subtasks=[{"description": "a", "done": False}])
+    assert _should_replan(state) is False
+
+
+def test_should_replan_true_when_plan_stale():
+    """plan_stale=True면 replan."""
+    state = make_state(subtasks=[{"description": "a", "done": False}], plan_stale=True)
+    assert _should_replan(state) is True
+
+
+def test_should_replan_true_when_all_subtasks_done_but_not_finished():
+    """모든 subtask가 done인데 is_done=False면 replan."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": True}, {"description": "b", "done": True}],
+        is_done=False,
+    )
+    assert _should_replan(state) is True
+
+
+def test_should_replan_blocked_by_max_replans():
+    """replan_count가 MAX_REPLANS에 도달하면 plan_stale=True여도 진입 안 한다."""
+    state = make_state(
+        subtasks=[{"description": "a", "done": False}],
+        plan_stale=True,
+        replan_count=MAX_REPLANS,
+    )
+    assert _should_replan(state) is False
+
+
+def test_route_after_verify_returns_end_when_done():
+    state = make_state(is_done=True)
+    assert _route_after_verify(state) == END
+
+
+def test_route_after_verify_returns_replan_when_should():
+    state = make_state(plan_stale=True, subtasks=[{"description": "a", "done": False}])
+    assert _route_after_verify(state) == "replan"
+
+
+def test_route_after_verify_returns_observe_otherwise():
+    state = make_state()
+    assert _route_after_verify(state) == "observe"
 
 
 # ── 통합 테스트 (LLM mock) ────────────────────────────────────────────────────
