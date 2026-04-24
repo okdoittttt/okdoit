@@ -14,6 +14,11 @@ LOOP_STOP_THRESHOLD = 4
 # action_history에 보관할 최근 시그니처 개수
 ACTION_HISTORY_MAX = 10
 
+# ── Replan 트리거 상수 ────────────────────────────────────────────────────────
+# 한 active subtask가 이 iterations 만큼 진행 안 되면 plan_stale=True 신호.
+# 한 cycle = observe(+1) + act(+1) = 2 iterations 이므로 8 ≈ 4 cycles 머무름.
+SUBTASK_STUCK_ITER_THRESHOLD: int = 8
+
 # 시그니처에 포함할 액션 파라미터 키. 부수 파라미터(timeout, count 등)는 제외한다.
 _SIG_KEY_FIELDS = ("index", "value", "target", "source")
 # 시그니처에 포함할 각 파라미터 값의 최대 길이. 긴 value로 시그니처가 부풀지 않도록.
@@ -81,6 +86,10 @@ async def verify(state: AgentState) -> AgentState:
                 "result": "동일 액션 반복으로 강제 종료했습니다.",
             }
 
+        new_start_iter, new_prev_active, stuck_signal = _apply_subtask_tracking(state)
+        # think 등 다른 경로가 세팅한 plan_stale=True를 보존하면서 stuck 신호와 OR 결합
+        new_plan_stale = bool(state.get("plan_stale") or stuck_signal)
+
         if state.get("error"):
             consecutive = state.get("consecutive_errors", 0) + 1
             recovery_msg: str = state["error"]  # type: ignore[assignment]
@@ -100,6 +109,9 @@ async def verify(state: AgentState) -> AgentState:
                 "consecutive_errors": consecutive,
                 "last_action_error": recovery_msg,
                 "error": None,
+                "subtask_start_iter": new_start_iter,
+                "prev_active_subtask": new_prev_active,
+                "plan_stale": new_plan_stale,
             }
 
         return {
@@ -108,6 +120,9 @@ async def verify(state: AgentState) -> AgentState:
             "is_done": False,
             "consecutive_errors": 0,
             "last_action_error": _LOOP_WARNING_MSG if loop_state == "warn" else None,
+            "subtask_start_iter": new_start_iter,
+            "prev_active_subtask": new_prev_active,
+            "plan_stale": new_plan_stale,
         }
 
     except Exception as e:
@@ -202,3 +217,56 @@ def _merge_loop_warning(existing_error: str) -> str:
         기존 에러 + 빈 줄 + 루프 경고가 결합된 문자열.
     """
     return f"{existing_error}\n\n[루프 경고] {_LOOP_WARNING_MSG}"
+
+
+def _current_subtask_index(state: AgentState) -> Optional[int]:
+    """첫 번째 미완료 subtask의 인덱스를 반환한다.
+
+    Args:
+        state: 현재 상태.
+
+    Returns:
+        active subtask의 0-based 인덱스. 모든 subtask가 done이거나 비어 있으면 None.
+    """
+    for i, t in enumerate(state.get("subtasks", [])):
+        if not t.get("done"):
+            return i
+    return None
+
+
+def _apply_subtask_tracking(state: AgentState) -> tuple[int, int, bool]:
+    """subtask 전환 추적과 stuck 감지를 수행한다.
+
+    호출자(verify의 정상 return 경로)는 반환된 3-튜플의 각 값을 명시적으로
+    state 필드에 매핑한다.
+
+    동작:
+        - 현재 active subtask의 인덱스가 직전과 다르면 ``subtask_start_iter`` 를
+          현재 ``iterations`` 로 갱신.
+        - active subtask가 있고 ``iterations - subtask_start_iter`` 가
+          ``SUBTASK_STUCK_ITER_THRESHOLD`` 이상이면 plan_stale 신호 True.
+
+    이 함수 자체는 think 등 다른 경로가 세팅한 ``state["plan_stale"]`` 을
+    덮어쓰지 않는다. 호출자가 OR 결합으로 보존해야 한다.
+
+    Args:
+        state: 현재 상태.
+
+    Returns:
+        (subtask_start_iter, prev_active_subtask, stuck_signal) 3-튜플.
+        stuck_signal=True는 "이 verify 호출에서 stuck을 새로 감지했음"을 의미.
+    """
+    cur_idx = _current_subtask_index(state)
+    cur_int = cur_idx if cur_idx is not None else -1
+    prev_idx = state.get("prev_active_subtask", -1)
+    start_iter = state.get("subtask_start_iter", 0)
+
+    if cur_int != prev_idx:
+        # active subtask가 전환됐거나 처음 등장 → 시작 시점 갱신
+        start_iter = state["iterations"]
+
+    stuck = (
+        cur_idx is not None
+        and (state["iterations"] - start_iter) >= SUBTASK_STUCK_ITER_THRESHOLD
+    )
+    return start_iter, cur_int, stuck

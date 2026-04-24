@@ -64,8 +64,9 @@ async def think(state: AgentState) -> AgentState:
 
         new_memory = _update_memory(state.get("memory", ""), parsed.get("memory_update"))
         new_history = _append_history_item(state, parsed)
+        plan_stale = bool(parsed.get("plan_stale", False))
 
-        return {
+        patch: dict[str, Any] = {
             **state,
             "messages": list(state["messages"]) + [response],
             "last_action": json.dumps(parsed["action"], ensure_ascii=False),
@@ -77,6 +78,11 @@ async def think(state: AgentState) -> AgentState:
             "last_action_error": None,
             "error": None,
         }
+        # plan_stale=True 만 명시적으로 전파한다. False는 verify 등 다른 경로가
+        # 세팅한 값을 덮지 않도록 그대로 둔다.
+        if plan_stale:
+            patch["plan_stale"] = True
+        return patch  # type: ignore[return-value]
     except KeyError as e:
         return {**state, "error": f"[think] 환경 변수 누락: {e}"}
     except Exception as e:

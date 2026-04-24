@@ -88,6 +88,15 @@ class AgentState(TypedDict):
             상호작용 가능 요소들. 키는 ``data-oi-idx`` 값과 동일한 인덱스. act
             노드는 이 맵을 직접 참조하지 않고, 브라우저 DOM에 심긴 속성을 통해
             locator를 만든다. 디버깅/트레이스 용도로 state에 보관한다.
+        plan_stale (bool): 현재 subtasks가 더 이상 유효하지 않다고 판단된 신호.
+            think가 명시적으로 요청하거나 verify가 stuck 패턴을 감지하면 True.
+            graph 라우터가 이를 보고 replan 노드로 분기한다.
+        subtask_start_iter (int): 현재 active subtask가 시작된 시점의 iterations 값.
+            verify가 subtask 전환을 감지할 때 갱신한다. stuck 임계값 계산에 사용.
+        prev_active_subtask (int): 직전 verify 호출 시점의 active subtask 인덱스.
+            전환 감지용. 활성 subtask가 없으면 -1.
+        replan_count (int): replan 노드가 호출된 횟수. 무한 replan 방지 상한이
+            graph 라우터에 적용된다.
     """
 
     task: str
@@ -111,3 +120,7 @@ class AgentState(TypedDict):
     action_history: list[str]
     last_action_result: Optional[dict[str, Any]]
     selector_map: dict[int, ElementInfo]
+    plan_stale: bool
+    subtask_start_iter: int
+    prev_active_subtask: int
+    replan_count: int
