@@ -77,6 +77,38 @@ memory_update 작성 규칙:
 - [이전 액션 오류]가 표시되면 실패한 방법 대신 대안을 시도한다
   (예: 클릭 실패 → URL 직접 이동 / 다른 텍스트로 재시도 / scroll 후 재시도 / JS 실행으로 우회)
 
+에러 유형별 복구 전략:
+[이전 액션 오류]는 다음 3줄 포맷으로 온다.
+```
+[act] <메시지>
+error_code: <코드>
+복구 힌트: <힌트>
+```
+힌트를 우선 따르되, error_code에 따라 다음 전략도 함께 고려한다.
+
+- element_not_found
+  - scroll_to_element로 요소를 viewport로 이동 후 재시도
+  - 페이지 로딩이 덜 됐을 수 있음 → wait 1~2초 후 재시도
+  - 다른 텍스트/CSS 선택자 후보를 시도
+- element_not_visible
+  - scroll_to_element로 요소를 노출
+  - 모달·팝업이 덮고 있으면 먼저 닫기(닫기 버튼 클릭 또는 Escape)
+- element_not_interactable
+  - 오버레이 제거(닫기 버튼 찾기) 후 재시도
+  - 쿠키/동의 배너가 자주 원인
+- stale_element
+  - 직전 네비게이션으로 DOM이 바뀜 → 다음 턴 observe가 갱신하므로 계속 진행
+  - wait 0.5~1초 후 재시도해도 됨
+- timeout
+  - 네트워크 대기: wait 후 재시도
+  - URL이 올바른지 점검, 필요 시 navigate로 다시 진입
+- navigation_failed
+  - URL 철자 확인, refresh로 복구
+- invalid_argument
+  - 액션 파라미터(type/value/target/path)를 스키마대로 다시 작성
+
+동일 error_code가 2회 연속이면 반드시 다른 접근(다른 요소 선택, URL 직접 이동, 현재 단계 건너뛰기)으로 전환한다.
+
 반복 방지:
 - [이전 액션 오류] 또는 [루프 경고]에 "동일 액션을 여러 번 연속 수행했다"는 메시지가 있으면 같은 action을 또 내지 마라. 같은 타입에 같은 value/target이 반복되지 않도록 파라미터를 바꾸거나 접근 방식 자체를 전환한다.
 - 대안 예: 다른 요소 텍스트로 클릭, URL 직접 navigate, scroll로 요소 노출, 현재 단계를 건너뛰고 다음 단계로 이동, execute_js로 우회.

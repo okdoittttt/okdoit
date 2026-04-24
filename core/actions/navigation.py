@@ -6,36 +6,45 @@ import time
 from playwright.async_api import Page
 
 from core.actions._registry import registry
+from core.actions.result import ActionResult
 
 _SCREENSHOT_DIR = ".screenshots"
 
 
 @registry.register("navigate")
-async def navigate(page: Page, action: dict) -> None:
+async def navigate(page: Page, action: dict) -> ActionResult:
     """URL로 이동한다.
 
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "navigate", "value": "<url>"}
+
+    Returns:
+        ActionResult. 실패 시 예외를 그대로 던진다(registry가 매핑).
     """
     await page.goto(action["value"], timeout=30_000, wait_until="domcontentloaded")
+    return ActionResult.ok()
 
 
 @registry.register("scroll")
-async def scroll(page: Page, action: dict) -> None:
+async def scroll(page: Page, action: dict) -> ActionResult:
     """페이지를 스크롤한다.
 
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "scroll", "value": "up" | "down"}
+
+    Returns:
+        ActionResult.
     """
     direction = action["value"]
     delta = 500 if direction == "down" else -500
     await page.evaluate(f"window.scrollBy(0, {delta})")
+    return ActionResult.ok()
 
 
 @registry.register("screenshot")
-async def screenshot(page: Page, action: dict) -> None:
+async def screenshot(page: Page, action: dict) -> ActionResult:
     """현재 페이지의 스크린샷을 저장한다.
 
     observe 노드의 자동 스크린샷과 별개로, 특정 시점에 수동으로 저장할 때 사용한다.
@@ -44,8 +53,11 @@ async def screenshot(page: Page, action: dict) -> None:
         page: 현재 Playwright 페이지
         action: {"type": "screenshot"} 또는 {"type": "screenshot", "filename": "name.png"}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: 스크린샷 저장에 실패한 경우
+        RuntimeError: 스크린샷 저장에 실패한 경우 (registry가 UNKNOWN으로 매핑).
     """
     filename: str = action.get("filename") or f"manual_{int(time.time())}.png"
     os.makedirs(_SCREENSHOT_DIR, exist_ok=True)
@@ -54,10 +66,11 @@ async def screenshot(page: Page, action: dict) -> None:
         await page.screenshot(path=path)
     except Exception as e:
         raise RuntimeError(f"스크린샷 저장 실패: {e}")
+    return ActionResult.ok()
 
 
 @registry.register("scroll_to_element")
-async def scroll_to_element(page: Page, action: dict) -> None:
+async def scroll_to_element(page: Page, action: dict) -> ActionResult:
     """특정 요소가 화면에 보이도록 스크롤한다.
 
     get_by_text → get_by_role → locator 순서로 시도한다.
@@ -66,8 +79,11 @@ async def scroll_to_element(page: Page, action: dict) -> None:
         page: 현재 Playwright 페이지
         action: {"type": "scroll_to_element", "value": "스크롤할 요소 텍스트"}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: 모든 locator 전략이 실패한 경우
+        RuntimeError: 모든 locator 전략이 실패한 경우 (ELEMENT_NOT_FOUND).
     """
     target: str = action["value"]
     timeout = 10_000
@@ -79,7 +95,7 @@ async def scroll_to_element(page: Page, action: dict) -> None:
     ]:
         try:
             await locator.first.scroll_into_view_if_needed(timeout=timeout)
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -87,24 +103,32 @@ async def scroll_to_element(page: Page, action: dict) -> None:
 
 
 @registry.register("refresh")
-async def refresh(page: Page, _action: dict) -> None:
+async def refresh(page: Page, _action: dict) -> ActionResult:
     """현재 페이지를 새로고침한다.
 
     Args:
         page: 현재 Playwright 페이지
         _action: {"type": "refresh"} (사용되지 않음)
+
+    Returns:
+        ActionResult.
     """
     await page.reload(timeout=30_000, wait_until="domcontentloaded")
+    return ActionResult.ok()
 
 
 @registry.register("back")
-async def back(page: Page, action: dict) -> None:
+async def back(page: Page, action: dict) -> ActionResult:
     """이전 페이지로 돌아간다.
 
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "back"} 또는 {"type": "back", "count": <횟수>}
+
+    Returns:
+        ActionResult.
     """
     count = action.get("count", 1)
     for _ in range(count):
         await page.go_back(timeout=10_000)
+    return ActionResult.ok()

@@ -1,10 +1,9 @@
 """상호작용 액션 - 클릭, 입력, 대기."""
 
-from typing import Optional
-
 from playwright.async_api import Page
 
 from core.actions._registry import registry
+from core.actions.result import ActionErrorCode, ActionResult
 from core.browser import BrowserManager
 
 _MAX_WAIT_SECONDS = 10.0
@@ -17,7 +16,7 @@ _NEW_TAB_WAIT_MS = 800
 
 
 @registry.register("click")
-async def click(page: Page, action: dict) -> None:
+async def click(page: Page, action: dict) -> ActionResult:
     """target 텍스트로 요소를 찾아 클릭한다.
 
     get_by_text → get_by_role → locator 순서로 시도한다.
@@ -26,6 +25,12 @@ async def click(page: Page, action: dict) -> None:
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "click", "value": "<target>"}
+
+    Returns:
+        ActionResult.
+
+    Raises:
+        RuntimeError: 모든 locator 전략이 실패한 경우 (ELEMENT_NOT_FOUND).
     """
     target = action["value"]
     timeout = 10_000
@@ -47,7 +52,7 @@ async def click(page: Page, action: dict) -> None:
                 BrowserManager()._page = new_page
             else:
                 await page.wait_for_load_state("domcontentloaded")
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -55,12 +60,18 @@ async def click(page: Page, action: dict) -> None:
 
 
 @registry.register("type")
-async def type_text(page: Page, action: dict) -> None:
+async def type_text(page: Page, action: dict) -> ActionResult:
     """입력 필드를 찾아 텍스트를 입력한다.
 
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "type", "target": "<field>", "value": "<text>"}
+
+    Returns:
+        ActionResult.
+
+    Raises:
+        RuntimeError: 모든 locator 전략이 실패한 경우 (ELEMENT_NOT_FOUND).
     """
     target = action["target"]
     text = action["value"]
@@ -80,7 +91,7 @@ async def type_text(page: Page, action: dict) -> None:
             await locator.first.clear(timeout=timeout)
             await locator.first.fill(text, timeout=timeout)
             await locator.first.press("Enter")
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -88,19 +99,23 @@ async def type_text(page: Page, action: dict) -> None:
 
 
 @registry.register("wait")
-async def wait(page: Page, action: dict) -> None:
+async def wait(page: Page, action: dict) -> ActionResult:
     """지정한 시간만큼 대기한다.
 
     Args:
         page: 현재 Playwright 페이지
         action: {"type": "wait", "value": <seconds: float>}
+
+    Returns:
+        ActionResult.
     """
     clamped = min(action["value"], _MAX_WAIT_SECONDS)
     await page.wait_for_timeout(clamped * 1_000)
+    return ActionResult.ok()
 
 
 @registry.register("press")
-async def press(page: Page, action: dict) -> None:
+async def press(page: Page, action: dict) -> ActionResult:
     """키보드 키를 누른다.
 
     target이 없으면 현재 포커스된 요소에 키를 입력하고,
@@ -111,8 +126,11 @@ async def press(page: Page, action: dict) -> None:
         action: {"type": "press", "value": "<key>"}
               또는 {"type": "press", "value": "<key>", "target": "<element>"}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: target이 지정되었으나 요소를 찾을 수 없는 경우
+        RuntimeError: target이 지정되었으나 요소를 찾을 수 없는 경우.
     """
     key = action["value"]
     target = action.get("target")
@@ -120,7 +138,7 @@ async def press(page: Page, action: dict) -> None:
 
     if target is None:
         await page.keyboard.press(key)
-        return
+        return ActionResult.ok()
 
     for locator in [
         page.get_by_text(target, exact=False),
@@ -129,7 +147,7 @@ async def press(page: Page, action: dict) -> None:
     ]:
         try:
             await locator.first.press(key, timeout=timeout)
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -137,7 +155,7 @@ async def press(page: Page, action: dict) -> None:
 
 
 @registry.register("hover")
-async def hover(page: Page, action: dict) -> None:
+async def hover(page: Page, action: dict) -> ActionResult:
     """target 텍스트로 요소를 찾아 마우스를 올린다 (hover).
 
     get_by_text → get_by_role → locator 순서로 시도한다.
@@ -147,8 +165,11 @@ async def hover(page: Page, action: dict) -> None:
         page: 현재 Playwright 페이지
         action: {"type": "hover", "value": "<target>"}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: 모든 locator 전략이 실패한 경우
+        RuntimeError: 모든 locator 전략이 실패한 경우.
     """
     target: str = action["value"]
     timeout = 10_000
@@ -160,7 +181,7 @@ async def hover(page: Page, action: dict) -> None:
     ]:
         try:
             await locator.first.hover(timeout=timeout)
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -168,7 +189,7 @@ async def hover(page: Page, action: dict) -> None:
 
 
 @registry.register("wait_for_element")
-async def wait_for_element(page: Page, action: dict) -> None:
+async def wait_for_element(page: Page, action: dict) -> ActionResult:
     """특정 요소가 페이지에 나타날 때까지 대기한다.
 
     get_by_text → locator 순서로 시도하며, 요소가 visible 상태가 될 때까지 기다린다.
@@ -179,8 +200,11 @@ async def wait_for_element(page: Page, action: dict) -> None:
         action: {"type": "wait_for_element", "value": "<target>"}
                 또는 {"type": "wait_for_element", "value": "<target>", "timeout": <seconds>}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: 지정된 시간 내 요소가 나타나지 않은 경우
+        RuntimeError: 지정된 시간 내 요소가 나타나지 않은 경우.
     """
     target: str = action["value"]
     raw_timeout: float = float(action.get("timeout", _DEFAULT_ELEMENT_TIMEOUT_SECONDS))
@@ -192,7 +216,7 @@ async def wait_for_element(page: Page, action: dict) -> None:
     ]:
         try:
             await locator.first.wait_for(state="visible", timeout=timeout_ms)
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -200,7 +224,7 @@ async def wait_for_element(page: Page, action: dict) -> None:
 
 
 @registry.register("check")
-async def check(page: Page, action: dict) -> None:
+async def check(page: Page, action: dict) -> ActionResult:
     """체크박스 또는 라디오 버튼을 지정한 상태로 설정한다.
 
     state가 "check"이면 선택, "uncheck"이면 해제한다.
@@ -211,16 +235,21 @@ async def check(page: Page, action: dict) -> None:
         action: {"type": "check", "value": "<target>"}
                 또는 {"type": "check", "value": "<target>", "state": "check" | "uncheck"}
 
+    Returns:
+        ActionResult. state 값이 잘못된 경우 INVALID_ARGUMENT로 명시적 fail.
+
     Raises:
-        ValueError: state 값이 "check" 또는 "uncheck"가 아닌 경우
-        RuntimeError: 모든 locator 전략이 실패한 경우
+        RuntimeError: 모든 locator 전략이 실패한 경우.
     """
     target: str = action["value"]
     state: str = action.get("state", "check")
     timeout = 10_000
 
     if state not in _VALID_CHECK_STATES:
-        raise ValueError(f"check 액션의 state는 'check' 또는 'uncheck'여야 합니다: '{state}'")
+        return ActionResult.fail(
+            ActionErrorCode.INVALID_ARGUMENT,
+            f"check 액션의 state는 'check' 또는 'uncheck'여야 합니다: '{state}'",
+        )
 
     for locator in [
         page.get_by_label(target),
@@ -232,7 +261,7 @@ async def check(page: Page, action: dict) -> None:
                 await locator.first.check(timeout=timeout)
             else:
                 await locator.first.uncheck(timeout=timeout)
-            return
+            return ActionResult.ok()
         except Exception:
             continue
 
@@ -240,7 +269,7 @@ async def check(page: Page, action: dict) -> None:
 
 
 @registry.register("extract")
-async def extract(page: Page, action: dict) -> Optional[str]:
+async def extract(page: Page, action: dict) -> ActionResult:
     """CSS 선택자 또는 텍스트로 요소의 내용을 추출한다.
 
     CSS 선택자로 먼저 시도하고, 실패하면 텍스트 기반 locator로 시도한다.
@@ -251,10 +280,10 @@ async def extract(page: Page, action: dict) -> Optional[str]:
         action: {"type": "extract", "value": "<CSS 선택자 또는 텍스트>"}
 
     Returns:
-        추출된 텍스트 문자열
+        ActionResult.ok(extracted=...) — 추출된 텍스트를 담는다.
 
     Raises:
-        RuntimeError: 요소를 찾을 수 없거나 추출에 실패한 경우
+        RuntimeError: 요소를 찾을 수 없거나 추출에 실패한 경우.
     """
     target: str = action["value"]
 
@@ -271,7 +300,7 @@ async def extract(page: Page, action: dict) -> Optional[str]:
             target,
         )
         if result:
-            return result
+            return ActionResult.ok(extracted=result)
     except Exception:
         pass
 
@@ -279,7 +308,7 @@ async def extract(page: Page, action: dict) -> Optional[str]:
         locator = page.get_by_text(target, exact=False)
         text = await locator.first.inner_text(timeout=5_000)
         if text:
-            return text.strip()
+            return ActionResult.ok(extracted=text.strip())
     except Exception:
         pass
 
@@ -287,7 +316,7 @@ async def extract(page: Page, action: dict) -> Optional[str]:
 
 
 @registry.register("execute_js")
-async def execute_js(page: Page, action: dict) -> Optional[str]:
+async def execute_js(page: Page, action: dict) -> ActionResult:
     """브라우저에서 JavaScript를 실행하고 결과를 반환한다.
 
     page.evaluate()를 통해 브라우저 샌드박스 내에서 실행된다.
@@ -298,21 +327,21 @@ async def execute_js(page: Page, action: dict) -> Optional[str]:
         action: {"type": "execute_js", "value": "<JS 코드>"}
 
     Returns:
-        JS 실행 결과를 문자열로 변환한 값. 결과가 None이면 빈 문자열.
+        ActionResult.ok(extracted=...) — JS 실행 결과를 문자열로 변환해 담는다.
 
     Raises:
-        RuntimeError: JS 실행 중 오류가 발생한 경우
+        RuntimeError: JS 실행 중 오류가 발생한 경우.
     """
     js_code: str = action["value"]
     try:
         result = await page.evaluate(js_code)
-        return str(result) if result is not None else ""
     except Exception as e:
         raise RuntimeError(f"JS 실행 실패: {e}")
+    return ActionResult.ok(extracted=str(result) if result is not None else "")
 
 
 @registry.register("drag_and_drop")
-async def drag_and_drop(page: Page, action: dict) -> None:
+async def drag_and_drop(page: Page, action: dict) -> ActionResult:
     """source 요소를 target 위치로 드래그 앤 드롭한다.
 
     텍스트 기반 locator로 먼저 시도하고, 실패하면 CSS 선택자로 시도한다.
@@ -321,8 +350,11 @@ async def drag_and_drop(page: Page, action: dict) -> None:
         page: 현재 Playwright 페이지
         action: {"type": "drag_and_drop", "source": "<드래그할 요소>", "target": "<드롭할 위치>"}
 
+    Returns:
+        ActionResult.
+
     Raises:
-        RuntimeError: 드래그 앤 드롭에 실패한 경우
+        RuntimeError: 드래그 앤 드롭에 실패한 경우.
     """
     source: str = action["source"]
     target: str = action["target"]
@@ -332,12 +364,12 @@ async def drag_and_drop(page: Page, action: dict) -> None:
         source_locator = page.get_by_text(source, exact=False).first
         target_locator = page.get_by_text(target, exact=False).first
         await source_locator.drag_to(target_locator, timeout=timeout)
-        return
+        return ActionResult.ok()
     except Exception:
         pass
 
     try:
         await page.drag_and_drop(source, target, timeout=timeout)
-        return
+        return ActionResult.ok()
     except Exception as e:
         raise RuntimeError(f"드래그 앤 드롭 실패: '{source}' → '{target}' - {e}")

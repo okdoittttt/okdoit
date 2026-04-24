@@ -84,4 +84,5 @@ def initial_state(task: str) -> AgentState:
         memory="",
         history_items=[],
         action_history=[],
+        last_action_result=None,
     )

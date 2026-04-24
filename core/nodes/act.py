@@ -1,61 +1,116 @@
 import json
-from typing import Optional
 
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
-
+from core.actions import registry
+from core.actions.result import ActionErrorCode, ActionResult, recovery_hint_for
 from core.browser import BrowserManager
 from core.state import AgentState
-from core.actions import registry
 
 
 async def act(state: AgentState) -> AgentState:
-    """last_action을 읽어서 실제 Playwright 명령으로 변환하고 실행한다.
+    """last_action을 읽어서 registry.dispatch로 실행하고 state를 갱신한다.
 
-    The Loop의 세 번째 노드. think 노드가 결정한 액션 문자열을 파싱해서
-    브라우저에 실행하고 iterations를 1 증가시킨다.
+    The Loop의 세 번째 노드. think 노드가 결정한 액션 문자열을 파싱해서 실제
+    브라우저에 실행한다. 실행 결과는 ``last_action_result`` 에 구조화 dict로 저장되며,
+    실패 시 프롬프트 친화적 에러 메시지가 ``error`` 에 기록된다.
+
+    ``extracted_result`` 는 성공한 액션이 돌려준 텍스트(extract/execute_js)로 채워지고,
+    실패하거나 데이터가 없으면 None이다.
 
     Args:
-        state: 현재 에이전트 상태
+        state: 현재 에이전트 상태.
 
     Returns:
-        iterations가 1 증가한 AgentState.
-        에러 발생 시 error 필드에 메시지를 기록하고 반환한다.
+        last_action_result, error, extracted_result, iterations가 갱신된 AgentState.
     """
     if state["is_done"]:
         return {**state, "iterations": state["iterations"] + 1}
 
+    action = _parse_action(state["last_action"] or "")
+    if "error" in action:
+        parse_fail = ActionResult.fail(
+            ActionErrorCode.INVALID_ARGUMENT,
+            action["error"],
+            recovery_hint_for(ActionErrorCode.INVALID_ARGUMENT),
+        )
+        return _state_for_failure(state, parse_fail)
+
     try:
         manager = BrowserManager()
         page = await manager.get_page()
+    except RuntimeError as e:
+        browser_fail = ActionResult.fail(
+            ActionErrorCode.UNKNOWN,
+            f"브라우저가 준비되지 않았습니다: {e}",
+            recovery_hint_for(ActionErrorCode.UNKNOWN),
+        )
+        return _state_for_failure(state, browser_fail)
 
-        action = _parse_action(state["last_action"] or "")
-        if "error" in action:
-            return {**state, "error": action["error"], "iterations": state["iterations"] + 1}
+    result = await registry.dispatch(page, action)
 
-        extracted = await _execute(page, action)
-
+    if result.success:
         return {
             **state,
+            "last_action_result": result.to_dict(),
             "error": None,
-            "extracted_result": extracted,
+            "extracted_result": result.extracted,
             "iterations": state["iterations"] + 1,
         }
-    except PlaywrightTimeoutError as e:
-        return {**state, "error": f"[act] Timeout: {e}", "iterations": state["iterations"] + 1}
-    except RuntimeError as e:
-        return {**state, "error": f"[act] Browser not ready: {e}", "iterations": state["iterations"] + 1}
-    except Exception as e:
-        return {**state, "error": f"[act] Unexpected error: {e}", "iterations": state["iterations"] + 1}
+    return _state_for_failure(state, result)
+
+
+def _state_for_failure(state: AgentState, result: ActionResult) -> AgentState:
+    """실패한 ActionResult로 공통 state 패치를 구성한다.
+
+    error 필드에는 LLM이 읽을 한 문단 메시지(메시지 + error_code + 복구 힌트)를 넣고,
+    last_action_result에는 원본 구조를 저장한다.
+
+    Args:
+        state: 현재 에이전트 상태.
+        result: success=False인 ActionResult.
+
+    Returns:
+        갱신된 AgentState. iterations는 1 증가한다.
+    """
+    return {
+        **state,
+        "last_action_result": result.to_dict(),
+        "error": _compose_error_message(result),
+        "extracted_result": None,
+        "iterations": state["iterations"] + 1,
+    }
+
+
+def _compose_error_message(result: ActionResult) -> str:
+    """ActionResult 실패를 LLM이 바로 읽을 수 있는 한 문단 메시지로 포맷한다.
+
+    형식:
+        [act] <error_message>
+        error_code: <code>
+        복구 힌트: <hint>
+
+    Args:
+        result: success=False인 ActionResult.
+
+    Returns:
+        세 줄 포맷의 에러 문자열. 없는 필드는 생략.
+    """
+    message = result.error_message or "알 수 없는 오류가 발생했습니다."
+    parts: list[str] = [f"[act] {message}"]
+    if result.error_code is not None:
+        parts.append(f"error_code: {result.error_code.value}")
+    if result.recovery_hint:
+        parts.append(f"복구 힌트: {result.recovery_hint}")
+    return "\n".join(parts)
 
 
 def _parse_action(action: str) -> dict:
     """last_action JSON 문자열을 파싱해서 액션 딕셔너리를 반환한다.
 
     Args:
-        action: think 노드가 json.dumps()로 직렬화한 액션 JSON 문자열
+        action: think 노드가 json.dumps()로 직렬화한 액션 JSON 문자열.
 
     Returns:
-        액션 딕셔너리. 파싱 실패 시 {"error": "..."} 를 반환한다.
+        액션 딕셔너리. 파싱 실패 시 {"error": "..."} 형태로 반환한다.
     """
     try:
         parsed = json.loads(action)
@@ -66,19 +121,3 @@ def _parse_action(action: str) -> dict:
         return {"error": f"[act] 액션에 type 필드가 없습니다: '{action}'"}
 
     return parsed
-
-
-async def _execute(page: Page, action: dict) -> Optional[str]:
-    """파싱된 액션을 registry를 통해 실행하고 결과를 반환한다.
-
-    Args:
-        page: 현재 Playwright 페이지
-        action: _parse_action()이 반환한 액션 딕셔너리
-
-    Returns:
-        액션 핸들러가 반환한 문자열. extract/execute_js 등 데이터 반환 액션에서만 값이 있다.
-
-    Raises:
-        ValueError: 등록되지 않은 액션 타입인 경우
-    """
-    return await registry.dispatch(page, action)

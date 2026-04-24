@@ -58,6 +58,10 @@ class AgentState(TypedDict):
         action_history (list[str]): verify 노드가 누적하는 액션 시그니처 리스트.
             동일 액션 반복을 감지해 루프 탈출에 사용한다. 최근
             ACTION_HISTORY_MAX 개만 유지된다.
+        last_action_result (Optional[dict]): act 노드가 실행한 가장 최근 액션의
+            구조화된 결과(`ActionResult.to_dict()`). success, error_code,
+            error_message, extracted, recovery_hint 필드를 포함한다. think/verify가
+            에러 분류와 복구 힌트 제공에 참고한다. 최초 상태에서는 None.
     """
 
     task: str
@@ -79,3 +83,4 @@ class AgentState(TypedDict):
     memory: str
     history_items: list[HistoryItem]
     action_history: list[str]
+    last_action_result: Optional[dict[str, Any]]
