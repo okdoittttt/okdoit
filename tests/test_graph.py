@@ -164,13 +164,29 @@ async def test_graph_terminates_after_max_consecutive_errors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_graph_terminates_on_max_iterations(tmp_path):
-    """MAX_LOOP_ITERATIONS를 초과하면 루프가 종료되는지 확인한다."""
-    mock_llm = _make_llm_mock({
-        "thought": "계속 진행",
-        "action": {"type": "navigate", "value": "https://example.com"},
-        "is_done": False,
-        "result": None,
-    })
+    """MAX_LOOP_ITERATIONS를 초과하면 루프가 종료되는지 확인한다.
+
+    LoopDetector와 충돌하지 않도록 매 턴 서로 다른 URL을 내는 mock을 사용한다.
+    LoopDetector는 동일 액션 반복을 감지하므로, max_iterations 경로를 테스트하려면
+    반복되지 않는 액션 시퀀스가 필요하다.
+    """
+    call_count = 0
+
+    async def dynamic_response(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        content = json.dumps({
+            "thought": f"스텝 {call_count}",
+            "action": {"type": "navigate", "value": f"https://example.com/{call_count}"},
+            "is_done": False,
+            "result": None,
+        })
+        return AIMessage(content=content)
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=dynamic_response)
+    mock_llm.extract_text = MagicMock(side_effect=lambda resp: resp.content)
+
     mock_page = AsyncMock()
     mock_page.url = "https://example.com"
     mock_page.evaluate = AsyncMock(return_value=[])
