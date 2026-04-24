@@ -55,6 +55,9 @@ class AgentState(TypedDict):
             오래된 스텝이 프롬프트에서 제거돼도 핵심 컨텍스트를 보존한다.
         history_items (list[HistoryItem]): think 노드가 매 턴 append하는 경량 요약.
             프롬프트 빌드 시 최근 KEEP_LAST_ITEMS개만 노출된다.
+        action_history (list[str]): verify 노드가 누적하는 액션 시그니처 리스트.
+            동일 액션 반복을 감지해 루프 탈출에 사용한다. 최근
+            ACTION_HISTORY_MAX 개만 유지된다.
     """
 
     task: str
@@ -75,3 +78,4 @@ class AgentState(TypedDict):
     last_action_error: Optional[str]
     memory: str
     history_items: list[HistoryItem]
+    action_history: list[str]
