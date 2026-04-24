@@ -5,8 +5,20 @@ import pytest
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from core.nodes.think import _apply_step_done, _build_messages, _format_plan, _parse_response, think
-from core.state import AgentState
+from core.nodes.think import (
+    KEEP_LAST_ITEMS,
+    MAX_MEMORY_CHARS,
+    _append_history_item,
+    _apply_step_done,
+    _build_messages,
+    _format_history_block,
+    _format_plan,
+    _parse_response,
+    _truncate,
+    _update_memory,
+    think,
+)
+from core.state import AgentState, HistoryItem
 
 load_dotenv()
 
@@ -24,6 +36,8 @@ def make_state(**kwargs) -> AgentState:
         "error": None,
         "iterations": 0,
         "subtasks": [],
+        "memory": "",
+        "history_items": [],
     }
     return {**base, **kwargs}
 
@@ -100,13 +114,20 @@ def test_build_messages_contains_task_and_url():
     assert "https://google.com" in text_block
 
 
-def test_build_messages_includes_history():
-    """이전 대화 히스토리가 메시지 리스트에 포함되는지 확인한다."""
+def test_build_messages_does_not_replay_raw_messages():
+    """state['messages']의 과거 AIMessage는 LLM 입력에 직접 포함되지 않는다.
+
+    컴팩션 도입 이후 history_items/memory로 대체되었다. messages는 감사 로그
+    용도로만 유지된다.
+    """
     history = [AIMessage(content="이전 응답")]
     state = make_state(messages=history)
     messages = _build_messages(state)
 
-    assert any(isinstance(m, AIMessage) for m in messages)
+    assert len(messages) == 2
+    assert isinstance(messages[0], SystemMessage)
+    assert isinstance(messages[1], HumanMessage)
+    assert not any(isinstance(m, AIMessage) for m in messages)
 
 
 def test_build_messages_no_screenshot_when_path_is_none():
@@ -499,6 +520,245 @@ async def test_think_handles_gemini_list_with_code_fence():
 
     assert result["error"] is None
     assert result["last_action"] == json.dumps(action, ensure_ascii=False)
+
+
+# ── 메시지 컴팩션 / memory / history_items 테스트 ─────────────────────────────
+
+def _make_history(n: int, start: int = 0) -> list[HistoryItem]:
+    """n개의 더미 HistoryItem을 만든다. step은 start부터 순차 증가."""
+    return [
+        {
+            "step": start + i,
+            "thought": f"스텝 {start + i} 분석",
+            "action": {"type": "click", "value": f"버튼{start + i}"},
+            "memory_update": None,
+        }
+        for i in range(n)
+    ]
+
+
+def test_build_messages_returns_exactly_two_messages():
+    """LLM 입력은 항상 [System, Human] 2개로 고정된다."""
+    state = make_state(
+        messages=[AIMessage(content="옛 응답1"), AIMessage(content="옛 응답2")],
+        history_items=_make_history(3),
+        memory="누적 요약",
+    )
+    messages = _build_messages(state)
+
+    assert len(messages) == 2
+    assert isinstance(messages[0], SystemMessage)
+    assert isinstance(messages[1], HumanMessage)
+
+
+def test_build_messages_includes_memory_block():
+    """memory가 있으면 [기억 메모] 섹션이 포함된다."""
+    state = make_state(memory="지금까지 A, B를 수집했다. 다음은 C.")
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[기억 메모]" in text
+    assert "지금까지 A, B를 수집했다" in text
+
+
+def test_build_messages_omits_memory_block_when_empty():
+    """memory가 비어있으면 [기억 메모] 섹션 자체가 없다."""
+    state = make_state(memory="")
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[기억 메모]" not in text
+
+
+def test_build_messages_includes_recent_history_items():
+    """history_items가 있으면 [최근 액션] 섹션에 step/thought/action이 표시된다."""
+    history = _make_history(3)
+    state = make_state(history_items=history)
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[최근 액션]" in text
+    for item in history:
+        assert f"#{item['step']}" in text
+        assert item["thought"] in text
+    assert "click" in text
+
+
+def test_build_messages_omits_old_history_items_beyond_keep_last():
+    """history_items가 KEEP_LAST_ITEMS보다 많으면 오래된 것은 생략 헤더로 대체된다."""
+    total = KEEP_LAST_ITEMS + 3
+    history = _make_history(total)
+    state = make_state(history_items=history)
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert f"앞선 3개 스텝 생략" in text
+    # 최근 KEEP_LAST_ITEMS개만 thought가 원본으로 실린다
+    for item in history[-KEEP_LAST_ITEMS:]:
+        assert item["thought"] in text
+    # 생략된 항목의 thought는 원본으로 실리지 않는다
+    for item in history[:-KEEP_LAST_ITEMS]:
+        assert item["thought"] not in text
+
+
+def test_build_messages_omits_history_section_when_empty():
+    """history_items가 비어있으면 [최근 액션] 섹션 자체가 없다."""
+    state = make_state(history_items=[])
+    messages = _build_messages(state)
+
+    text = messages[-1].content[0]["text"]
+    assert "[최근 액션]" not in text
+
+
+def test_build_messages_includes_only_current_screenshot(tmp_path):
+    """스크린샷은 현재 턴 파일 하나만 image_url 블록으로 포함된다.
+
+    과거 스크린샷이 messages/history에 참조되어 있어도 LLM 입력에는 들어가지 않는다.
+    """
+    img = tmp_path / "step_5.png"
+    img.write_bytes(b"\x89PNG\r\n")
+    state = make_state(
+        screenshot_path=str(img),
+        history_items=_make_history(3),
+        messages=[AIMessage(content="옛 응답")],
+    )
+    messages = _build_messages(state)
+
+    human = messages[-1]
+    image_blocks = [b for b in human.content if b.get("type") == "image_url"]
+    assert len(image_blocks) == 1
+
+
+# ── _truncate / _update_memory / _append_history_item 단위 테스트 ─────────────
+
+def test_truncate_below_limit_returns_original():
+    assert _truncate("짧은 문자열", 100) == "짧은 문자열"
+
+
+def test_truncate_exceeds_limit_adds_ellipsis():
+    result = _truncate("a" * 50, 10)
+    assert len(result) == 10
+    assert result.endswith("…")
+
+
+def test_truncate_zero_limit_returns_empty():
+    assert _truncate("anything", 0) == ""
+
+
+def test_update_memory_none_keeps_previous():
+    assert _update_memory("기존 메모", None) == "기존 메모"
+
+
+def test_update_memory_empty_string_keeps_previous():
+    assert _update_memory("기존 메모", "   ") == "기존 메모"
+
+
+def test_update_memory_new_value_overwrites():
+    assert _update_memory("기존", "새 요약") == "새 요약"
+
+
+def test_update_memory_truncates_oversized():
+    huge = "x" * (MAX_MEMORY_CHARS + 100)
+    result = _update_memory("", huge)
+    assert len(result) == MAX_MEMORY_CHARS
+
+
+def test_append_history_item_does_not_mutate_original():
+    """원본 history_items는 변경되지 않는다."""
+    state = make_state(iterations=3, history_items=[])
+    parsed = {"thought": "t", "action": {"type": "click", "value": "x"}, "memory_update": None}
+    new_list = _append_history_item(state, parsed)
+
+    assert new_list is not state["history_items"]
+    assert len(state["history_items"]) == 0
+    assert len(new_list) == 1
+    assert new_list[0]["step"] == 3
+    assert new_list[0]["action"] == {"type": "click", "value": "x"}
+
+
+def test_append_history_item_coerces_non_dict_action_to_empty():
+    """action이 dict가 아니면 빈 dict로 저장한다(방어적)."""
+    state = make_state(iterations=1, history_items=[])
+    parsed = {"thought": "t", "action": None, "memory_update": "mem"}
+    new_list = _append_history_item(state, parsed)
+
+    assert new_list[0]["action"] == {}
+    assert new_list[0]["memory_update"] == "mem"
+
+
+def test_format_history_block_empty_returns_empty_string():
+    assert _format_history_block([]) == ""
+
+
+# ── think()에서 memory/history_items 통합 동작 테스트 ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_think_appends_history_item():
+    """LLM 응답 후 history_items에 새 항목이 append된다."""
+    action = {"type": "navigate", "value": "https://example.com"}
+    mock_llm = _make_llm_mock({
+        "thought": "페이지 이동",
+        "action": action,
+        "memory_update": "구글 이동 직전. 다음은 검색어 입력.",
+        "is_done": False,
+        "result": None,
+    })
+    initial_history = _make_history(2, start=0)
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(iterations=2, history_items=initial_history))
+
+    assert len(result["history_items"]) == 3
+    last = result["history_items"][-1]
+    assert last["step"] == 2
+    assert last["action"] == action
+    assert last["memory_update"] == "구글 이동 직전. 다음은 검색어 입력."
+
+
+@pytest.mark.asyncio
+async def test_think_updates_memory_when_memory_update_present():
+    """LLM이 memory_update를 내면 state['memory']가 해당 값으로 갱신된다."""
+    mock_llm = _make_llm_mock({
+        "thought": "진행",
+        "action": {"type": "wait", "value": 1},
+        "memory_update": "새 요약: 페이지 A 도달",
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(memory="이전 요약"))
+
+    assert result["memory"] == "새 요약: 페이지 A 도달"
+
+
+@pytest.mark.asyncio
+async def test_think_preserves_memory_when_memory_update_absent():
+    """memory_update 필드가 없으면 기존 memory를 유지한다."""
+    mock_llm = _make_llm_mock({
+        "thought": "진행",
+        "action": {"type": "wait", "value": 1},
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(memory="유지되어야 하는 요약"))
+
+    assert result["memory"] == "유지되어야 하는 요약"
+
+
+@pytest.mark.asyncio
+async def test_think_preserves_memory_when_memory_update_is_null():
+    """memory_update=null이어도 기존 memory를 유지한다."""
+    mock_llm = _make_llm_mock({
+        "thought": "진행",
+        "action": {"type": "wait", "value": 1},
+        "memory_update": None,
+        "is_done": False,
+        "result": None,
+    })
+    with patch("core.nodes.think.build_llm", return_value=mock_llm):
+        result = await think(make_state(memory="유지되어야 함"))
+
+    assert result["memory"] == "유지되어야 함"
 
 
 # ── think() 통합 테스트 ────────────────────────────────────────────────────────
