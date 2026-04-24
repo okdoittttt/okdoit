@@ -3,7 +3,15 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from core.actions.navigation import navigate, back, refresh, screenshot, scroll_to_element
+from core.actions.navigation import (
+    back,
+    navigate,
+    refresh,
+    screenshot,
+    scroll_to_element,
+    scroll_to_index,
+)
+from core.actions.result import ActionErrorCode
 
 
 @pytest.mark.asyncio
@@ -128,3 +136,37 @@ async def test_back_with_count():
     # 모든 호출의 timeout 인자 확인
     for call in mock_page.go_back.call_args_list:
         assert call[1]["timeout"] == 10_000
+
+
+# ── scroll_to_index ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_scroll_to_index_uses_data_oi_idx_selector():
+    """scroll_to_index는 data-oi-idx locator로 요소를 짚고 scroll_into_view를 호출한다."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.count = AsyncMock(return_value=1)
+    mock_locator.first.scroll_into_view_if_needed = AsyncMock()
+    mock_page.locator = MagicMock(return_value=mock_locator)
+
+    result = await scroll_to_index(mock_page, {"type": "scroll_to_index", "index": 5})
+
+    assert result.success is True
+    mock_page.locator.assert_called_with('[data-oi-idx="5"]')
+    mock_locator.first.scroll_into_view_if_needed.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_scroll_to_index_missing_element_returns_not_found():
+    """인덱스에 해당하는 요소가 없으면 ELEMENT_NOT_FOUND."""
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.count = AsyncMock(return_value=0)
+    mock_page.locator = MagicMock(return_value=mock_locator)
+
+    result = await scroll_to_index(mock_page, {"type": "scroll_to_index", "index": 99})
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.ELEMENT_NOT_FOUND
+    assert "99" in (result.error_message or "")

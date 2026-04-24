@@ -123,7 +123,7 @@ async def test_observe_screenshot_filename_matches_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_observe_dom_text_contains_page_info_sections(tmp_path):
-    """dom_text에 [Page Info], [Clickable Elements], [Page Content] 섹션이 포함되는지 확인한다."""
+    """dom_text에 [Page Info], [Interactive Elements], [Page Content] 섹션이 포함되는지 확인한다."""
     manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
     await manager.start()
     page = await manager.get_page()
@@ -134,7 +134,7 @@ async def test_observe_dom_text_contains_page_info_sections(tmp_path):
 
     dom_text = result["dom_text"]
     assert "[Page Info]" in dom_text
-    assert "[Clickable Elements]" in dom_text
+    assert "[Interactive Elements]" in dom_text
     assert "[Page Content]" in dom_text
     assert "Title:" in dom_text
     assert "URL:" in dom_text
@@ -206,7 +206,6 @@ async def test_observe_clickable_elements_deduplicates(tmp_path):
     await manager.start()
     page = await manager.get_page()
 
-    # onclick 속성을 가진 button을 포함하는 HTML 페이지
     html_content = """
     <html>
     <body>
@@ -221,10 +220,182 @@ async def test_observe_clickable_elements_deduplicates(tmp_path):
     state = make_state()
     result = await observe(state)
 
-    # dom_text에서 클릭 가능한 요소 섹션 추출
     dom_text = result["dom_text"]
-    clickable_section = dom_text.split("[Page Content]")[0]
+    interactive_section = dom_text.split("[Page Content]")[0]
 
-    # Submit 버튼이 한 번만 나타나는지 확인 (중복 제거 검증)
-    submit_count = clickable_section.count("Submit")
+    submit_count = interactive_section.count("Submit")
     assert submit_count == 1, f"Submit 버튼이 {submit_count}번 나타났습니다 (중복 발생)"
+
+
+# ── 인덱싱 (selector_map + data-oi-idx) 통합 테스트 ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_observe_populates_selector_map(tmp_path):
+    """observe가 상호작용 요소들을 selector_map에 인덱스별로 저장한다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.set_content("""
+    <html><body>
+      <button>확인</button>
+      <a href="/next">다음</a>
+      <input type="text" placeholder="검색">
+    </body></html>
+    """)
+
+    state = make_state()
+    result = await observe(state)
+
+    smap = result["selector_map"]
+    assert isinstance(smap, dict)
+    assert len(smap) >= 3
+    # 키는 0부터 순차
+    assert 0 in smap
+    # 각 항목은 필수 필드 보유
+    first = smap[0]
+    assert "tag" in first
+    assert "text" in first
+    assert "attributes" in first
+    assert "bbox" in first
+    # 태그 셋이 예상과 맞음
+    tags = {e["tag"] for e in smap.values()}
+    assert {"button", "a", "input"}.issubset(tags)
+
+
+@pytest.mark.asyncio
+async def test_observe_assigns_data_oi_idx_attribute(tmp_path):
+    """observe 후 각 요소에 data-oi-idx 속성이 심긴다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.set_content("""
+    <html><body>
+      <button id="b1">첫번째</button>
+      <button id="b2">두번째</button>
+    </body></html>
+    """)
+
+    state = make_state()
+    result = await observe(state)
+
+    smap = result["selector_map"]
+    assert len(smap) == 2
+    # DOM에 실제로 속성이 심겼는지 확인
+    b1_idx = await page.get_attribute("#b1", "data-oi-idx")
+    b2_idx = await page.get_attribute("#b2", "data-oi-idx")
+    assert b1_idx is not None
+    assert b2_idx is not None
+    assert b1_idx != b2_idx
+    # selector_map의 키와 일치
+    assert int(b1_idx) in smap
+    assert int(b2_idx) in smap
+
+
+@pytest.mark.asyncio
+async def test_observe_interactive_elements_format(tmp_path):
+    """[Interactive Elements] 섹션에 [N]<tag ...>text</tag> 포맷으로 표시된다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.set_content("""
+    <html><body>
+      <button>확인</button>
+      <a href="/x">링크</a>
+    </body></html>
+    """)
+
+    state = make_state()
+    result = await observe(state)
+
+    dom_text = result["dom_text"]
+    # 적어도 [0]으로 시작하는 라인이 섹션 안에 있어야 한다
+    assert "[Interactive Elements]" in dom_text
+    assert "[0]<" in dom_text
+    # 태그명이 프롬프트에 노출된다
+    assert "<button" in dom_text or "<a" in dom_text
+
+
+@pytest.mark.asyncio
+async def test_observe_reindexes_on_next_call(tmp_path):
+    """연속 observe 호출 시 이전 data-oi-idx는 제거되고 새 인덱스가 부여된다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.set_content("""
+    <html><body>
+      <button>1</button>
+      <button>2</button>
+      <button>3</button>
+    </body></html>
+    """)
+
+    await observe(make_state())
+    # DOM 변경: 첫 버튼 제거
+    await page.evaluate("document.querySelectorAll('button')[0].remove()")
+    result2 = await observe(make_state())
+
+    # 두 번째 observe 이후 남아있는 data-oi-idx 속성 수 = 남은 버튼 수
+    remaining = await page.evaluate("document.querySelectorAll('[data-oi-idx]').length")
+    assert remaining == 2
+    assert len(result2["selector_map"]) == 2
+    # 인덱스는 0, 1 로 재부여됨
+    assert set(result2["selector_map"].keys()) == {0, 1}
+
+
+@pytest.mark.asyncio
+async def test_observe_empty_page_has_empty_selector_map(tmp_path):
+    """상호작용 요소가 없는 페이지는 빈 selector_map을 갖는다."""
+    manager = BrowserManager(headless=True, screenshot_dir=str(tmp_path))
+    await manager.start()
+    page = await manager.get_page()
+    await page.set_content("<html><body><p>텍스트만 있는 페이지</p></body></html>")
+
+    result = await observe(make_state())
+
+    assert result["selector_map"] == {}
+    assert "(상호작용 가능한 요소 없음)" in result["dom_text"]
+
+
+# ── _format_element_line 단위 테스트 ─────────────────────────────────────────
+
+
+def test_format_element_line_button_with_text():
+    """텍스트 있는 button은 <tag>text</tag> 형식으로 포맷된다."""
+    from core.nodes.observe import _format_element_line
+    elem = {"index": 3, "tag": "button", "role": None, "text": "확인", "attributes": {}, "bbox": [0, 0, 0, 0]}
+    line = _format_element_line(elem)
+    assert line == "[3]<button>확인</button>"
+
+
+def test_format_element_line_input_void():
+    """input은 텍스트가 있어도 자기완결(void) 태그로 포맷된다."""
+    from core.nodes.observe import _format_element_line
+    elem = {"index": 1, "tag": "input", "role": None, "text": "", "attributes": {"type": "email", "placeholder": "이메일"}, "bbox": [0, 0, 0, 0]}
+    line = _format_element_line(elem)
+    assert line.startswith("[1]<input")
+    assert line.endswith("/>")
+    assert 'type="email"' in line
+    assert 'placeholder="이메일"' in line
+
+
+def test_format_element_line_link_with_href():
+    """a는 href 속성과 텍스트가 함께 포맷된다."""
+    from core.nodes.observe import _format_element_line
+    elem = {"index": 0, "tag": "a", "role": None, "text": "로그인", "attributes": {"href": "/login"}, "bbox": [0, 0, 0, 0]}
+    line = _format_element_line(elem)
+    assert line == '[0]<a href="/login">로그인</a>'
+
+
+def test_format_element_line_truncates_long_text():
+    """80자 초과 텍스트는 말줄임표로 잘린다."""
+    from core.nodes.observe import _format_element_line
+    long_text = "가" * 200
+    elem = {"index": 0, "tag": "button", "role": None, "text": long_text, "attributes": {}, "bbox": [0, 0, 0, 0]}
+    line = _format_element_line(elem)
+    assert "…" in line
+    # 200자 원본보다 훨씬 짧아야 한다 (태그 래퍼 포함해도)
+    assert len(line) < len(long_text)
+    # 텍스트 부분(태그 래퍼 제외)은 80자 이하
+    inner = line.removeprefix("[0]<button>").removesuffix("</button>")
+    assert len(inner) <= 80

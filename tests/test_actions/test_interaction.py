@@ -5,12 +5,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 from core.actions.interaction import (
     check,
+    check_by_index,
     click,
+    click_by_index,
     drag_and_drop,
     execute_js,
     extract,
     hover,
+    hover_by_index,
     press,
+    press_by_index,
+    type_by_index,
     type_text,
     wait,
     wait_for_element,
@@ -337,3 +342,164 @@ async def test_drag_and_drop_falls_back_to_page_drag_and_drop():
     await drag_and_drop(mock_page, {"type": "drag_and_drop", "source": ".item", "target": ".zone"})
 
     mock_page.drag_and_drop.assert_called_once_with(".item", ".zone", timeout=10_000)
+
+
+# ── 인덱스 기반 액션 단위 테스트 ────────────────────────────────────────────────
+
+
+def _index_page_mock(count: int = 1) -> tuple[AsyncMock, MagicMock]:
+    """인덱스 locator mock을 만들어 (page, locator.first) 튜플을 돌려준다.
+
+    Args:
+        count: locator.count() 반환값. 0이면 요소 없음 시뮬레이션.
+    """
+    mock_page = AsyncMock()
+    mock_locator = MagicMock()
+    mock_locator.count = AsyncMock(return_value=count)
+    mock_locator.first = MagicMock()
+    mock_locator.first.click = AsyncMock()
+    mock_locator.first.fill = AsyncMock()
+    mock_locator.first.clear = AsyncMock()
+    mock_locator.first.press = AsyncMock()
+    mock_locator.first.hover = AsyncMock()
+    mock_locator.first.check = AsyncMock()
+    mock_locator.first.uncheck = AsyncMock()
+    mock_locator.first.scroll_into_view_if_needed = AsyncMock()
+    mock_page.locator = MagicMock(return_value=mock_locator)
+    mock_page.context.pages = []
+    mock_page.wait_for_timeout = AsyncMock()
+    mock_page.wait_for_load_state = AsyncMock()
+    return mock_page, mock_locator.first
+
+
+@pytest.mark.asyncio
+async def test_click_by_index_uses_data_oi_idx_selector():
+    """click_index는 '[data-oi-idx="N"]' locator로 요소를 짚는다."""
+    mock_page, first = _index_page_mock()
+
+    result = await click_by_index(mock_page, {"type": "click_index", "index": 7})
+
+    assert result.success is True
+    mock_page.locator.assert_called_with('[data-oi-idx="7"]')
+    first.click.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_click_by_index_returns_element_not_found_when_missing():
+    """count()가 0이면 ELEMENT_NOT_FOUND로 fail하고 click은 호출되지 않는다."""
+    mock_page, first = _index_page_mock(count=0)
+
+    result = await click_by_index(mock_page, {"type": "click_index", "index": 42})
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.ELEMENT_NOT_FOUND
+    assert "42" in (result.error_message or "")
+    first.click.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_click_by_index_tolerates_scroll_failure():
+    """scroll_into_view가 실패해도 click은 그대로 시도된다."""
+    mock_page, first = _index_page_mock()
+    first.scroll_into_view_if_needed = AsyncMock(side_effect=Exception("can't scroll"))
+
+    result = await click_by_index(mock_page, {"type": "click_index", "index": 1})
+
+    assert result.success is True
+    first.click.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_type_by_index_clears_fills_and_presses_enter():
+    """type_index는 clear → fill → Enter 순서로 호출한다(기본 submit=True)."""
+    mock_page, first = _index_page_mock()
+
+    result = await type_by_index(mock_page, {"type": "type_index", "index": 2, "value": "hello"})
+
+    assert result.success is True
+    first.clear.assert_called_once()
+    first.fill.assert_called_once_with("hello", timeout=10_000)
+    first.press.assert_called_once_with("Enter")
+
+
+@pytest.mark.asyncio
+async def test_type_by_index_without_submit():
+    """submit=False이면 Enter를 누르지 않는다."""
+    mock_page, first = _index_page_mock()
+
+    result = await type_by_index(mock_page, {
+        "type": "type_index", "index": 3, "value": "foo", "submit": False,
+    })
+
+    assert result.success is True
+    first.fill.assert_called_once()
+    first.press.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_type_by_index_missing_element():
+    """요소가 없으면 ELEMENT_NOT_FOUND."""
+    mock_page, first = _index_page_mock(count=0)
+
+    result = await type_by_index(mock_page, {"type": "type_index", "index": 9, "value": "x"})
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.ELEMENT_NOT_FOUND
+    first.fill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hover_by_index():
+    """hover_index는 locator.hover를 호출한다."""
+    mock_page, first = _index_page_mock()
+
+    result = await hover_by_index(mock_page, {"type": "hover_index", "index": 4})
+
+    assert result.success is True
+    first.hover.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_press_by_index():
+    """press_index는 지정 키로 locator.press를 호출한다."""
+    mock_page, first = _index_page_mock()
+
+    result = await press_by_index(mock_page, {"type": "press_index", "index": 5, "value": "Escape"})
+
+    assert result.success is True
+    first.press.assert_called_once_with("Escape", timeout=10_000)
+
+
+@pytest.mark.asyncio
+async def test_check_by_index_default_checks():
+    """check_index 기본값은 check()."""
+    mock_page, first = _index_page_mock()
+
+    result = await check_by_index(mock_page, {"type": "check_index", "index": 6})
+
+    assert result.success is True
+    first.check.assert_called_once()
+    first.uncheck.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_by_index_uncheck():
+    """state='uncheck'면 uncheck()."""
+    mock_page, first = _index_page_mock()
+
+    result = await check_by_index(mock_page, {"type": "check_index", "index": 7, "state": "uncheck"})
+
+    assert result.success is True
+    first.uncheck.assert_called_once()
+    first.check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_by_index_invalid_state():
+    """잘못된 state는 INVALID_ARGUMENT, locator 조회도 건너뛴다."""
+    mock_page = AsyncMock()
+
+    result = await check_by_index(mock_page, {"type": "check_index", "index": 1, "state": "toggle"})
+
+    assert result.success is False
+    assert result.error_code == ActionErrorCode.INVALID_ARGUMENT
