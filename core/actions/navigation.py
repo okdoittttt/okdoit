@@ -6,9 +6,10 @@ import time
 from playwright.async_api import Page
 
 from core.actions._registry import registry
-from core.actions.result import ActionResult
+from core.actions.result import ActionErrorCode, ActionResult
 
 _SCREENSHOT_DIR = ".screenshots"
+_INDEX_ACTION_TIMEOUT_MS = 10_000
 
 
 @registry.register("navigate")
@@ -131,4 +132,32 @@ async def back(page: Page, action: dict) -> ActionResult:
     count = action.get("count", 1)
     for _ in range(count):
         await page.go_back(timeout=10_000)
+    return ActionResult.ok()
+
+
+@registry.register("scroll_to_index")
+async def scroll_to_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 요소가 뷰포트에 보이도록 스크롤한다.
+
+    observe가 인덱싱한 요소가 뷰포트 바깥에 있을 때 사용한다. 일반 ``scroll`` 과
+    달리 정확한 요소를 타겟으로 한다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "scroll_to_index", "index": <int>}``.
+
+    Returns:
+        ActionResult. 인덱스에 해당하는 요소가 없으면 ELEMENT_NOT_FOUND로 실패.
+    """
+    idx = int(action["index"])
+    loc = page.locator(f'[data-oi-idx="{idx}"]')
+    if await loc.count() == 0:
+        return ActionResult.fail(
+            ActionErrorCode.ELEMENT_NOT_FOUND,
+            (
+                f"인덱스 {idx}의 요소가 현재 DOM에 없습니다. 페이지가 전환되었거나 "
+                "observe 이후 DOM이 변경됐을 수 있습니다."
+            ),
+        )
+    await loc.first.scroll_into_view_if_needed(timeout=_INDEX_ACTION_TIMEOUT_MS)
     return ActionResult.ok()

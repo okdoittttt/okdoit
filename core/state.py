@@ -22,6 +22,28 @@ class HistoryItem(TypedDict):
     memory_update: Optional[str]
 
 
+class ElementInfo(TypedDict):
+    """observe 노드가 인덱싱한 상호작용 가능 요소 한 개의 정보.
+
+    브라우저 내에서 ``data-oi-idx`` 속성이 심긴 요소를 이 구조로 Python 측에
+    옮겨온다. 인덱스 기반 액션은 ``data-oi-idx`` 로 locator를 직접 만든다.
+
+    Attributes:
+        index: 0부터 순차 할당된 인덱스. ``data-oi-idx`` 값과 동일.
+        tag: HTML 태그명(소문자). 예: "button", "input", "a".
+        role: ARIA role 또는 null. 프롬프트 노출에만 사용.
+        text: 요소의 innerText/textContent. 최대 100자로 truncate.
+        attributes: type/name/value/placeholder/aria-label/title/alt/href 중 존재하는 것만.
+        bbox: 요소의 뷰포트 기준 [x, y, width, height]. 디버깅/스크롤 판단용.
+    """
+    index: int
+    tag: str
+    role: Optional[str]
+    text: str
+    attributes: dict[str, str]
+    bbox: list[float]
+
+
 class AgentState(TypedDict):
     """The Loop 전체에서 공유되는 에이전트 상태.
 
@@ -62,6 +84,10 @@ class AgentState(TypedDict):
             구조화된 결과(`ActionResult.to_dict()`). success, error_code,
             error_message, extracted, recovery_hint 필드를 포함한다. think/verify가
             에러 분류와 복구 힌트 제공에 참고한다. 최초 상태에서는 None.
+        selector_map (dict[int, ElementInfo]): observe 노드가 이번 턴에 인덱싱한
+            상호작용 가능 요소들. 키는 ``data-oi-idx`` 값과 동일한 인덱스. act
+            노드는 이 맵을 직접 참조하지 않고, 브라우저 DOM에 심긴 속성을 통해
+            locator를 만든다. 디버깅/트레이스 용도로 state에 보관한다.
     """
 
     task: str
@@ -84,3 +110,4 @@ class AgentState(TypedDict):
     history_items: list[HistoryItem]
     action_history: list[str]
     last_action_result: Optional[dict[str, Any]]
+    selector_map: dict[int, ElementInfo]

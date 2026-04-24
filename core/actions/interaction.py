@@ -1,6 +1,14 @@
-"""상호작용 액션 - 클릭, 입력, 대기."""
+"""상호작용 액션 - 클릭, 입력, 대기.
 
-from playwright.async_api import Page
+텍스트 기반 액션(``click``, ``type`` 등)과 인덱스 기반 액션(``click_index``,
+``type_index`` 등)이 공존한다. LLM은 인덱스 기반을 우선 사용하고, observe가
+인덱싱하지 못한 케이스(동적 요소 등)에만 텍스트 기반을 폴백으로 쓴다.
+
+인덱스 기반 액션은 observe 노드가 브라우저에 심은 ``data-oi-idx`` 속성을
+locator로 직접 지정한다. 매 턴 observe가 재부여하므로 한 턴 안에서만 유효하다.
+"""
+
+from playwright.async_api import Locator, Page
 
 from core.actions._registry import registry
 from core.actions.result import ActionErrorCode, ActionResult
@@ -13,6 +21,41 @@ _VALID_CHECK_STATES = frozenset({"check", "uncheck"})
 
 
 _NEW_TAB_WAIT_MS = 800
+_INDEX_ACTION_TIMEOUT_MS = 10_000
+
+
+def _locator_for_index(page: Page, idx: int) -> Locator:
+    """data-oi-idx 속성으로 locator를 만든다(존재 여부 체크 전 단계).
+
+    Args:
+        page: 현재 Playwright 페이지.
+        idx: observe가 부여한 정수 인덱스.
+
+    Returns:
+        ``[data-oi-idx="{idx}"]`` 로 좁혀진 locator.
+    """
+    return page.locator(f'[data-oi-idx="{idx}"]')
+
+
+async def _assert_index_exists(loc: Locator, idx: int) -> ActionResult | None:
+    """인덱스에 해당하는 요소가 DOM에 존재하는지 확인한다.
+
+    Args:
+        loc: ``_locator_for_index`` 결과.
+        idx: 에러 메시지용 인덱스 값.
+
+    Returns:
+        존재하면 None. 없으면 ``ActionResult.fail(ELEMENT_NOT_FOUND, ...)``.
+    """
+    if await loc.count() == 0:
+        return ActionResult.fail(
+            ActionErrorCode.ELEMENT_NOT_FOUND,
+            (
+                f"인덱스 {idx}의 요소가 현재 DOM에 없습니다. 페이지가 전환되었거나 "
+                "observe 이후 DOM이 변경됐을 수 있습니다. 다음 턴에서 최신 인덱스를 사용하세요."
+            ),
+        )
+    return None
 
 
 @registry.register("click")
@@ -373,3 +416,156 @@ async def drag_and_drop(page: Page, action: dict) -> ActionResult:
         return ActionResult.ok()
     except Exception as e:
         raise RuntimeError(f"드래그 앤 드롭 실패: '{source}' → '{target}' - {e}")
+
+
+# ── 인덱스 기반 액션 ─────────────────────────────────────────────────────────
+# observe가 심은 data-oi-idx 속성으로 요소를 직접 참조한다. 텍스트 매칭 불필요.
+
+
+@registry.register("click_index")
+async def click_by_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 요소를 클릭한다.
+
+    새 탭이 열리면 BrowserManager의 활성 페이지를 해당 탭으로 전환한다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "click_index", "index": <int>}``.
+
+    Returns:
+        ActionResult. 인덱스에 해당하는 요소가 없으면 ELEMENT_NOT_FOUND로 실패.
+    """
+    idx = int(action["index"])
+    loc = _locator_for_index(page, idx)
+    missing = await _assert_index_exists(loc, idx)
+    if missing is not None:
+        return missing
+
+    try:
+        await loc.first.scroll_into_view_if_needed(timeout=5_000)
+    except Exception:
+        # 스크롤 실패는 치명적이지 않다. 일부 요소(fixed, in-viewport)는 이미 보이거나
+        # scroll_into_view가 불필요한 경우가 있다. 클릭을 그대로 시도한다.
+        pass
+
+    pages_before = list(page.context.pages)
+    await loc.first.click(timeout=_INDEX_ACTION_TIMEOUT_MS)
+    await page.wait_for_timeout(_NEW_TAB_WAIT_MS)
+
+    new_pages = [p for p in page.context.pages if p not in pages_before]
+    if new_pages:
+        new_page = new_pages[-1]
+        await new_page.wait_for_load_state("domcontentloaded")
+        BrowserManager()._page = new_page
+    else:
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
+        except Exception:
+            pass
+    return ActionResult.ok()
+
+
+@registry.register("type_index")
+async def type_by_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 입력 필드에 텍스트를 입력한다.
+
+    기본 동작은 기존 값을 clear 후 fill + Enter 입력이다. Enter를 누르지 않으려면
+    ``"submit": false`` 를 명시한다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "type_index", "index": <int>, "value": "<text>", "submit"?: bool}``.
+
+    Returns:
+        ActionResult. 인덱스 없음은 ELEMENT_NOT_FOUND로 실패.
+    """
+    idx = int(action["index"])
+    text = action["value"]
+    submit = bool(action.get("submit", True))
+
+    loc = _locator_for_index(page, idx)
+    missing = await _assert_index_exists(loc, idx)
+    if missing is not None:
+        return missing
+
+    await loc.first.clear(timeout=_INDEX_ACTION_TIMEOUT_MS)
+    await loc.first.fill(text, timeout=_INDEX_ACTION_TIMEOUT_MS)
+    if submit:
+        await loc.first.press("Enter")
+    return ActionResult.ok()
+
+
+@registry.register("hover_index")
+async def hover_by_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 요소에 마우스를 올린다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "hover_index", "index": <int>}``.
+
+    Returns:
+        ActionResult.
+    """
+    idx = int(action["index"])
+    loc = _locator_for_index(page, idx)
+    missing = await _assert_index_exists(loc, idx)
+    if missing is not None:
+        return missing
+
+    await loc.first.hover(timeout=_INDEX_ACTION_TIMEOUT_MS)
+    return ActionResult.ok()
+
+
+@registry.register("press_index")
+async def press_by_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 요소에 포커스 후 키보드 키를 입력한다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "press_index", "index": <int>, "value": "<key>"}``.
+            value는 Playwright 키 이름(Enter/Escape/Tab/ArrowDown 등).
+
+    Returns:
+        ActionResult.
+    """
+    idx = int(action["index"])
+    key = action["value"]
+    loc = _locator_for_index(page, idx)
+    missing = await _assert_index_exists(loc, idx)
+    if missing is not None:
+        return missing
+
+    await loc.first.press(key, timeout=_INDEX_ACTION_TIMEOUT_MS)
+    return ActionResult.ok()
+
+
+@registry.register("check_index")
+async def check_by_index(page: Page, action: dict) -> ActionResult:
+    """인덱스로 지정된 체크박스/라디오를 설정한다.
+
+    Args:
+        page: 현재 Playwright 페이지.
+        action: ``{"type": "check_index", "index": <int>, "state"?: "check"|"uncheck"}``.
+            state 기본값은 "check".
+
+    Returns:
+        ActionResult. state 값이 잘못되면 INVALID_ARGUMENT, 요소 없음은 ELEMENT_NOT_FOUND.
+    """
+    idx = int(action["index"])
+    state = action.get("state", "check")
+    if state not in _VALID_CHECK_STATES:
+        return ActionResult.fail(
+            ActionErrorCode.INVALID_ARGUMENT,
+            f"check_index의 state는 'check' 또는 'uncheck'여야 합니다: '{state}'",
+        )
+
+    loc = _locator_for_index(page, idx)
+    missing = await _assert_index_exists(loc, idx)
+    if missing is not None:
+        return missing
+
+    if state == "check":
+        await loc.first.check(timeout=_INDEX_ACTION_TIMEOUT_MS)
+    else:
+        await loc.first.uncheck(timeout=_INDEX_ACTION_TIMEOUT_MS)
+    return ActionResult.ok()
