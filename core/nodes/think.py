@@ -6,6 +6,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.context import format_runtime_context_block
 from core.llm import build_llm
 from core.state import AgentState
 
@@ -90,10 +91,13 @@ def _build_messages(state: AgentState) -> list:
         if last_error else ""
     )
 
+    context_block = format_runtime_context_block()
+
     content: list = [
         {
             "type": "text",
             "text": (
+                f"{context_block}\n\n"
                 f"목표: {state['task']}\n"
                 f"현재 URL: {state['current_url']}"
                 f"{plan_section}"

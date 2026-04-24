@@ -6,6 +6,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.context import format_runtime_context_block
 from core.llm import build_llm
 from core.state import AgentState
 
@@ -27,9 +28,10 @@ async def plan(state: AgentState) -> AgentState:
     try:
         llm = build_llm()
         system_prompt = _PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
+        context_block = format_runtime_context_block()
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"목표: {state['task']}"),
+            HumanMessage(content=f"{context_block}\n\n목표: {state['task']}"),
         ]
         response = await llm.ainvoke(
             messages,
