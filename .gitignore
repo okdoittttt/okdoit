@@ -212,3 +212,10 @@ __marimo__/
 
 plan/
 .plan/
+
+# Desktop (Electron + React)
+desktop/node_modules/
+desktop/out/
+desktop/dist/
+desktop/.vite/
+desktop/.electron-vite/

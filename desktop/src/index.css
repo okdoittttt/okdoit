@@ -1,0 +1,14 @@
+/* v0.1 minimal reset. Tailwind 도입은 04 단계에서. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #fff;
+}
