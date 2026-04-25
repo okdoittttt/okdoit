@@ -158,20 +158,113 @@ npm run dev
 
 ### 패키징 (v0.4)
 
-```bash
-# 1) sidecar 를 PyInstaller 로 묶기 (Chromium 동봉 포함)
-pip install -r requirements-build.txt
-./scripts/build_sidecar.sh
+설치 파일(.dmg / .exe / .AppImage) 만들기. 두 단계로 진행됨.
 
-# 2) 데스크탑 앱 + 설치 파일 빌드
-cd desktop
-npm run dist:mac     # macOS dmg
-npm run dist:win     # Windows nsis
-npm run dist:linux   # Linux AppImage
-# → desktop/release/ 에 산출물
+#### 사전 준비 (한 번만)
+
+```bash
+# Python venv 가 활성화된 상태여야 함
+source .venv/bin/activate          # macOS / Linux
+# .venv\Scripts\activate.bat       # Windows
+
+# 빌드 전용 의존성 추가 설치 (PyInstaller 등)
+pip install -r requirements-build.txt
+
+# Playwright Chromium 이 한 번이라도 설치돼 있어야 함
+playwright install chromium
+
+# Node 의존성 (이미 했다면 스킵)
+cd desktop && npm install && cd ..
 ```
 
-코드 사이닝 / 공증 / CI 매트릭스는 `.plan/05-packaging-distribution.md` 참조.
+#### 단계 1 — sidecar 빌드 (PyInstaller, **5~15분**)
+
+`server/main.py` 와 모든 LLM 의존성을 단일 디렉토리로 묶고 Chromium 도 동봉합니다.
+
+```bash
+./scripts/build_sidecar.sh
+```
+
+- **산출물:** `dist/okdoit-agent/`
+  - `okdoit-agent` — 단일 실행 파일 (~16MB)
+  - `_internal/` — Python 의존성들
+  - `playwright-browsers/` — 동봉 Chromium (~150MB)
+- **검증:** 빌드 후 직접 띄워보기
+  ```bash
+  ./dist/okdoit-agent/okdoit-agent
+  # → 콘솔에 "Uvicorn running on http://127.0.0.1:8765" 가 보이면 OK
+  # → Ctrl+C 로 종료
+  ```
+
+#### 단계 2 — 설치 파일 빌드 (electron-builder, **1~2분**)
+
+위 sidecar 산출물을 Electron 앱에 임베드해 OS별 설치 파일을 만듭니다.
+
+```bash
+cd desktop
+```
+
+**macOS** (Apple Silicon 과 Intel 둘 다 빌드):
+```bash
+npm run dist:mac
+# → release/okdoit-0.1.0-arm64.dmg    (M1/M2/M3/M4 등)
+# → release/okdoit-0.1.0-x64.dmg      (Intel Mac)
+# → release/okdoit-0.1.0-mac.zip      (자동 업데이트용)
+```
+
+**Windows**:
+```bash
+npm run dist:win
+# → release/okdoit-Setup-0.1.0.exe    (NSIS 인스톨러)
+```
+
+**Linux**:
+```bash
+npm run dist:linux
+# → release/okdoit-0.1.0.AppImage
+```
+
+#### 단계 3 — 설치 + 첫 실행 (macOS 기준)
+
+> ⚠️ 코드 사이닝 안 한 빌드라 macOS Gatekeeper 가 처음에 막습니다. 한 번만 우회하면 됩니다.
+
+```bash
+# Apple Silicon 기준
+open desktop/release/okdoit-0.1.0-arm64.dmg
+```
+
+1. Finder 가 열리면 `okdoit.app` 을 드래그해서 **응용 프로그램** 폴더에 떨어뜨림
+2. 마운트된 디스크 추출 (Finder 사이드바의 ⏏ 버튼)
+3. 응용 프로그램에서 `okdoit.app` **우클릭 → "열기"** (더블클릭 X)
+4. "개발자를 확인할 수 없습니다" 경고 → **"열기"** 다시 클릭
+
+**우클릭이 안 통하는 최신 macOS** (Sequoia 등):
+- 좌상단 🍎 → **시스템 설정** → **개인정보 보호 및 보안**
+- 아래 보안 섹션의 "okdoit 차단" 옆 **"어쨌든 열기"** 클릭 → 비밀번호 / Touch ID
+
+#### 알려진 갭 — API 키 전달 (v0.4 UX 단계에서 해결 예정)
+
+현재 패키징본에는 `.env` 가 동봉되지 않아 LLM 호출 시 키가 없어 실패합니다.
+
+**임시 검증법** — Terminal 에서 환경변수 주고 띄우기:
+```bash
+ANTHROPIC_API_KEY=sk-ant-... LLM_PROVIDER=anthropic LLM_MODEL=claude-sonnet-4-6 \
+  open -a "okdoit"
+```
+
+**정식 해결**: 첫 실행 시 API 키 입력 화면 → OS 키체인 저장 (다음 마일스톤).
+
+#### 빌드 안 되거나 앱이 안 뜰 때
+
+| 증상 | 원인 / 해결 |
+|---|---|
+| `./scripts/build_sidecar.sh` 가 `pyinstaller: command not found` | `pip install -r requirements-build.txt` 안 됨. venv 활성화 후 재시도 |
+| PyInstaller 빌드 중 `ImportError` | 새 LLM 라이브러리 추가 시 흔함. `--collect-all <module>` 옵션을 `scripts/build_sidecar.sh` 에 추가 |
+| dmg 는 만들어졌는데 앱 더블클릭하면 즉시 종료 | Terminal 에서 `/Applications/okdoit.app/Contents/MacOS/okdoit` 직접 실행해 콘솔 로그 확인 |
+| 콘솔에 `[sidecar] ...` 찍히지 않음 | sidecar 가 dmg 에 안 들어감. `dist/okdoit-agent/` 가 비어있는지 확인 후 단계 1 재실행 |
+| 콘솔에 `[sidecar] Error loading ASGI app` | (해결됨, v0.4) PyInstaller 가 string import 못 따라가는 문제. `server/main.py` 가 `from server.internal.app import app` 쓰는지 확인 |
+
+코드 사이닝 / 공증 / CI 매트릭스 / 자동 업데이트는 `.plan/05-packaging-distribution.md` 참조.
 
 ### FastAPI Sidecar — 데스크탑 앱 / 외부 클라이언트용
 
@@ -279,19 +372,18 @@ mypy core/ server/
 ## 로드맵
 
 ### 완료 ✅
-- The Loop 구현 (plan / observe / think / act / verify / replan)
-- Playwright 브라우저 제어 + DOM 인덱싱
-- CLI 인터페이스 (`agent.py`)
-- 멀티 LLM 프로바이더 (Anthropic / Gemini / Ollama / OpenAI)
-- 동적 replan (stuck 패턴 / 계획 부족 자동 감지)
-- 액션 결과 분류 + 복구 힌트 (ActionResult)
-- 메모리 컴팩션 (history_items + memory)
-- **FastAPI sidecar** (REST + WebSocket 이벤트 스트리밍)
-- **세션 제어** (pause / resume / stop)
+- **에이전트 코어** — The Loop (plan / observe / think / act / verify / replan), 동적 replan, ActionResult 복구 힌트, 메모리 컴팩션
+- **CLI** (`agent.py`) — 단일 작업 실행
+- **멀티 LLM 프로바이더** — Anthropic / Gemini / Ollama / OpenAI
+- **FastAPI sidecar** — REST + WebSocket 이벤트 스트리밍, pause/resume/stop, 동적 포트
+- **v0.1 데스크탑 앱** — Electron + React + Tailwind, 1-pane 활동 로그 UI
+- **v0.2 개입 UI** — ControlButtons, StatusBadge, 작업 템플릿 카드
+- **v0.3 멀티 세션** — SessionList 좌측 패널, 멀티 WS 매니저, 세션별 ContextVar 격리, 결과 아티팩트 + 마크다운/JSON 복사
 
-### 진행 예정 (`.plan/06-roadmap.md` 참조)
-- **v0.1** — Electron 데스크탑 앱: 활동 로그 1-pane UI
-- **v0.2** — Pause / Resume / Stop UI, 동적 포트, 작업 템플릿
-- **v0.3** — 멀티 세션, 결과 아티팩트 패널, 세션 히스토리
-- **v0.4** — 패키징(.dmg / .exe), 자동 업데이트, 코드 사이닝
-- **v0.5** — 사전 승인 게이트, Take Over, BrowserView 임베드
+### 진행 중 🔧
+- **v0.4 패키징** — PyInstaller + electron-builder 빌드 파이프라인 코드 완료. 실제 빌드 검증 + 사이닝 + 첫 실행 UX 진행 예정
+
+### 다음 ⏭
+- **v0.5** — 사전 승인 게이트, Take Over (사용자 직접 제어), BrowserView 임베드, 자동 업데이트
+
+세부 체크리스트는 `.plan/06-roadmap.md` 참조.
