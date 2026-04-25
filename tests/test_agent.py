@@ -26,14 +26,6 @@ def make_state(**kwargs) -> AgentState:
     return {**base, **kwargs}
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def reset_singleton():
-    BrowserManager._instance = None
-    yield
-    if BrowserManager._instance is not None:
-        await BrowserManager._instance.stop()
-
-
 # ── _print_step 단위 테스트 ───────────────────────────────────────────────────
 
 def test_print_step_think_outputs_thought_and_action(capsys):

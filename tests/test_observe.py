@@ -30,15 +30,6 @@ def make_state(**kwargs) -> AgentState:
     return {**base, **kwargs}
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def reset_singleton():
-    """각 테스트 전후로 싱글톤 인스턴스를 초기화한다."""
-    BrowserManager._instance = None
-    yield
-    if BrowserManager._instance is not None:
-        await BrowserManager._instance.stop()
-
-
 @pytest.mark.asyncio
 async def test_observe_without_browser_returns_error():
     """브라우저 시작 없이 observe 호출 시 error 필드에 메시지가 기록되는지 확인한다."""

@@ -180,8 +180,8 @@ async def test_graph_runs_and_terminates_on_is_done(tmp_path):
     mock_manager.take_screenshot = AsyncMock(return_value=str(tmp_path / "step_0.png"))
 
     with (
-        patch("core.nodes.observe.BrowserManager", return_value=mock_manager),
-        patch("core.nodes.act.BrowserManager", return_value=mock_manager),
+        patch("core.nodes.observe.BrowserManager.current", return_value=mock_manager),
+        patch("core.nodes.act.BrowserManager.current", return_value=mock_manager),
         patch("core.nodes.think.build_llm", return_value=mock_llm),
     ):
         graph = create_graph()
@@ -207,8 +207,8 @@ async def test_graph_terminates_after_max_consecutive_errors(tmp_path):
     mock_manager.get_page = AsyncMock(side_effect=RuntimeError("browser not started"))
 
     with (
-        patch("core.nodes.observe.BrowserManager", return_value=mock_manager),
-        patch("core.nodes.act.BrowserManager", return_value=mock_manager),
+        patch("core.nodes.observe.BrowserManager.current", return_value=mock_manager),
+        patch("core.nodes.act.BrowserManager.current", return_value=mock_manager),
         patch("core.nodes.plan.build_llm", return_value=mock_llm),
         patch("core.nodes.think.build_llm", return_value=mock_llm),
     ):
@@ -257,8 +257,8 @@ async def test_graph_terminates_on_max_iterations(tmp_path):
     mock_manager.take_screenshot = AsyncMock(return_value=str(tmp_path / "step.png"))
 
     with (
-        patch("core.nodes.observe.BrowserManager", return_value=mock_manager),
-        patch("core.nodes.act.BrowserManager", return_value=mock_manager),
+        patch("core.nodes.observe.BrowserManager.current", return_value=mock_manager),
+        patch("core.nodes.act.BrowserManager.current", return_value=mock_manager),
         patch("core.nodes.think.build_llm", return_value=mock_llm),
     ):
         graph = create_graph()

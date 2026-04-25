@@ -28,14 +28,6 @@ def make_state(**kwargs) -> AgentState:
     return {**base, **kwargs}
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def reset_singleton():
-    BrowserManager._instance = None
-    yield
-    if BrowserManager._instance is not None:
-        await BrowserManager._instance.stop()
-
-
 # ── _parse_action 단위 테스트 ──────────────────────────────────────────────────
 
 def test_parse_action_navigate():
@@ -103,7 +95,7 @@ async def test_act_increments_iterations():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(last_action=json.dumps({"type": "navigate", "value": "https://example.com"})))
 
     assert result["iterations"] == 1
@@ -115,7 +107,7 @@ async def test_act_increments_iterations_on_error():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(side_effect=RuntimeError("not started"))
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(last_action=json.dumps({"type": "navigate", "value": "https://example.com"})))
 
     assert result["iterations"] == 1
@@ -129,7 +121,7 @@ async def test_act_records_error_on_unknown_action():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(last_action="알 수 없는 명령어"))
 
     assert result["error"] is not None
@@ -152,7 +144,7 @@ async def test_act_clears_error_on_success():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(last_action=json.dumps({"type": "navigate", "value": "https://example.com"}), error="이전 에러"))
 
     assert result["error"] is None
@@ -177,7 +169,7 @@ async def test_act_records_success_last_action_result():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(
             last_action=json.dumps({"type": "navigate", "value": "https://example.com"}),
         ))
@@ -197,7 +189,7 @@ async def test_act_records_failure_with_error_code():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(
             last_action=json.dumps({"type": "navigate", "value": "https://example.com"}),
         ))
@@ -218,7 +210,7 @@ async def test_act_parse_error_records_invalid_argument():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(last_action="이건 JSON 아님"))
 
     lar = result["last_action_result"]
@@ -234,7 +226,7 @@ async def test_act_extract_sets_extracted_result():
     mock_manager = MagicMock()
     mock_manager.get_page = AsyncMock(return_value=mock_page)
 
-    with patch("core.nodes.act.BrowserManager", return_value=mock_manager):
+    with patch("core.nodes.act.BrowserManager.current", return_value=mock_manager):
         result = await act(make_state(
             last_action=json.dumps({"type": "extract", "value": "h1"}),
         ))
