@@ -5,34 +5,37 @@ import { useSession } from "@/stores/sessionStore";
 interface Props {
   /** 입력 가능 여부. status 가 idle/finished/errored/stopped 일 때만 true. */
   enabled: boolean;
+  /** controlled value. App 에서 lift up 해 TaskTemplates 와 공유. */
+  value: string;
+  /** value 변경 콜백. */
+  onChange: (next: string) => void;
 }
 
 const SUBMIT_HOTKEY_HINT = "⌘ + Enter 로 전송";
 
 /**
- * 작업 입력창.
+ * 작업 입력창 (controlled).
  *
  * Enter 또는 ``⌘+Enter`` 로 전송. 진행 중에는 비활성화된다. 전송 성공하면
  * ``sessionStore.startSession`` 으로 store 에 sessionId/task 를 박는다 — 그 시점에
  * App 의 ``useEventStream(sessionId)`` 가 WS 를 연다.
  */
-export function TaskInput({ enabled }: Props) {
-  const [text, setText] = useState("");
+export function TaskInput({ enabled, value, onChange }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const startSession = useSession((s) => s.startSession);
 
-  const canSubmit = enabled && !submitting && text.trim().length > 0;
+  const canSubmit = enabled && !submitting && value.trim().length > 0;
 
   async function submit() {
     if (!canSubmit) return;
-    const task = text.trim();
+    const task = value.trim();
     setSubmitting(true);
     setSubmitError(null);
     try {
       const res = await postRun({ task, headless: false });
       startSession(res.session_id, task);
-      setText("");
+      onChange("");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setSubmitError(message);
@@ -44,8 +47,8 @@ export function TaskInput({ enabled }: Props) {
   return (
     <div className="space-y-2">
       <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();

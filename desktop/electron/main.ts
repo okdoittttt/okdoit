@@ -6,20 +6,22 @@
  *   2) sidecar 의 /health 가 200 응답할 때까지 기다린 뒤 BrowserWindow 를 띄운다.
  *   3) 앱 종료 시 sidecar 를 SIGTERM → 일정 시간 후 SIGKILL 로 정리한다.
  *
- * v0.1 은 dev 모드만 지원한다(`python -m server.main` 직접 실행).
- * v0.4 에서 PyInstaller 산출물로 prod 분기를 추가할 예정 — `.plan/05-packaging-distribution.md`.
+ * v0.2: sidecar 포트는 OS 가 잡아주는 free port 를 사용한다(다중 인스턴스 / 점유
+ * 충돌 회피). main process 의 ``process.env.OKDOIT_PORT`` 에도 같은 값을 set 해서
+ * preload 가 동일 포트를 본다.
+ *
+ * dev 모드만 지원. v0.4 에서 PyInstaller 산출물로 prod 분기 추가 예정 —
+ * `.plan/05-packaging-distribution.md` 참조.
  */
 
 import { app, BrowserWindow, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import waitOn from "wait-on";
 
 // ── 상수 ───────────────────────────────────────────────────────
-
-/** sidecar 가 바인딩할 포트. v0.2 에서 동적 포트로 교체 예정. */
-const SIDECAR_PORT = 8765;
 
 /** sidecar 헬스체크 대기 최대 시간(ms). 첫 부팅 시 의존성 import 가 느릴 수 있음. */
 const SIDECAR_BOOT_TIMEOUT_MS = 30_000;
@@ -31,7 +33,7 @@ const SIDECAR_KILL_GRACE_MS = 3_000;
 const WINDOW_WIDTH = 1280;
 const WINDOW_HEIGHT = 800;
 
-/** 로컬 sidecar 베이스 URL. */
+/** 로컬 sidecar 베이스 호스트. 외부 노출 금지. */
 const SIDECAR_HOST = "127.0.0.1";
 
 // ── 경로 ───────────────────────────────────────────────────────
@@ -47,20 +49,49 @@ const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 let sidecar: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+// ── 유틸 ──────────────────────────────────────────────────────
+
+/**
+ * OS 가 자동 할당한 free port 를 잡아 그 번호를 돌려주고 즉시 닫는다.
+ *
+ * 잡은 후 닫고 spawn 하기까지 짧은 race 가 존재하지만, 로컬호스트 + 즉시 사용
+ * 패턴에서는 실제로 충돌이 거의 없다. v0.5 이후 필요하면 retry 로직 추가.
+ */
+async function getFreePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, SIDECAR_HOST, () => {
+      const addr = srv.address();
+      if (addr === null || typeof addr === "string") {
+        srv.close();
+        reject(new Error("free port 주소 가져오기 실패"));
+        return;
+      }
+      const { port } = addr;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 // ── sidecar 라이프사이클 ───────────────────────────────────────
 
 /**
  * Python sidecar 를 spawn 하고 /health 가 응답할 때까지 기다린다.
  *
- * dev 모드: 시스템 `python` 으로 `python -m server.main` 실행.
- * prod 모드(미구현): PyInstaller 로 묶은 단일 실행 파일을 띄울 예정.
+ * 호출 전제: 호출 측이 ``process.env.OKDOIT_PORT`` 를 이미 set 한 상태.
+ *   preload 가 동일 환경변수를 보고 sidecar URL 을 만들기 때문이다.
+ *
+ * Args:
+ *   port: sidecar 가 바인딩할 포트. ``getFreePort()`` 로 잡은 값.
  */
-async function startSidecar(): Promise<void> {
+async function startSidecar(port: number): Promise<void> {
   const isDev = !app.isPackaged;
 
   if (!isDev) {
     throw new Error(
-      "프로덕션 빌드는 v0.4 에서 지원 예정입니다 (PyInstaller 산출물 필요)."
+      "프로덕션 빌드는 v0.4 에서 지원 예정입니다 (PyInstaller 산출물 필요).",
     );
   }
 
@@ -71,7 +102,7 @@ async function startSidecar(): Promise<void> {
     env: {
       ...process.env,
       OKDOIT_HOST: SIDECAR_HOST,
-      OKDOIT_PORT: String(SIDECAR_PORT),
+      OKDOIT_PORT: String(port),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -88,7 +119,7 @@ async function startSidecar(): Promise<void> {
   });
 
   await waitOn({
-    resources: [`http-get://${SIDECAR_HOST}:${SIDECAR_PORT}/health`],
+    resources: [`http-get://${SIDECAR_HOST}:${port}/health`],
     timeout: SIDECAR_BOOT_TIMEOUT_MS,
     interval: 200,
   });
@@ -153,7 +184,13 @@ function createMainWindow(): void {
 
 void app.whenReady().then(async () => {
   try {
-    await startSidecar();
+    const port = await getFreePort();
+    // preload 가 ``process.env.OKDOIT_PORT`` 를 읽어 sidecar URL 을 만든다.
+    process.env.OKDOIT_HOST = SIDECAR_HOST;
+    process.env.OKDOIT_PORT = String(port);
+    console.log(`[main] sidecar 포트: ${port}`);
+
+    await startSidecar(port);
   } catch (err) {
     console.error("[main] sidecar 부팅 실패:", err);
     app.quit();
