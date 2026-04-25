@@ -1,0 +1,7 @@
+# sidecar 패키징 전용 의존성. 일반 실행에는 불필요.
+#
+# 사용:
+#   pip install -r requirements.txt -r requirements-build.txt
+#   ./scripts/build_sidecar.sh
+
+pyinstaller>=6.10.0

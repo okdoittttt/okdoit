@@ -1,0 +1,82 @@
+# electron-builder 설정 (v0.4 패키징).
+#
+# 빌드 흐름:
+#   1) ``../scripts/build_sidecar.sh`` 가 PyInstaller 산출물을 ``../dist/okdoit-agent/`` 에 만든다.
+#   2) ``npm run build`` 가 main / preload / renderer 를 ``out/`` 에 빌드.
+#   3) electron-builder 가 ``extraResources`` 로 sidecar 디렉토리를 ``resources/sidecar/`` 에 임베드.
+#   4) target 별 산출물(.dmg / .nsis / .AppImage) 을 ``release/`` 에 만든다.
+#
+# 알려진 함정:
+#   - macOS notarization: APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID 환경변수 필요.
+#     초기엔 ``mac.notarize: false`` 로 두고 출시 직전 전환.
+#   - ``hardenedRuntime`` + 동봉 Chromium 호환을 위해 entitlements 에 unsigned-executable-memory 허용.
+#   - Windows: EV 인증서 없이 출시 시 SmartScreen 경고 — 문제 없음 (사용자가 "더 보기" 클릭).
+
+appId: kr.datco.okdoit
+productName: okdoit
+copyright: Copyright © 2026 okdoit
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - "out/**/*"
+  - "package.json"
+  - "!**/*.map"
+
+# PyInstaller 산출물 디렉토리 통째로 ``resources/sidecar/`` 에 임베드.
+# main.ts 의 ``SIDECAR_BIN_DIR = "sidecar"`` 와 동기화.
+extraResources:
+  - from: "../dist/okdoit-agent"
+    to: "sidecar"
+    filter:
+      - "**/*"
+
+asar: true
+
+# ── macOS ─────────────────────────────────────────────────────
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: "build/entitlements.mac.plist"
+  entitlementsInherit: "build/entitlements.mac.plist"
+  # 출시 직전에 ``true`` 로 전환 + Apple Developer 인증서 환경변수 셋업.
+  notarize: false
+
+dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+
+# ── Windows ───────────────────────────────────────────────────
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # EV 인증서 도입 전엔 사이닝 생략. 사용자가 SmartScreen 에서 "더 보기" 클릭으로 통과.
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+# ── Linux ─────────────────────────────────────────────────────
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Utility

@@ -147,6 +147,32 @@ python agent.py --task "내일 서울 날씨 알려줘"
 python agent.py --task "내일 서울 날씨 알려줘" --no-headless
 ```
 
+### 데스크탑 앱 (개발 모드)
+
+```bash
+cd desktop
+npm install
+npm run dev
+# → Electron 창이 뜨고 sidecar 도 자동으로 spawn 됨
+```
+
+### 패키징 (v0.4)
+
+```bash
+# 1) sidecar 를 PyInstaller 로 묶기 (Chromium 동봉 포함)
+pip install -r requirements-build.txt
+./scripts/build_sidecar.sh
+
+# 2) 데스크탑 앱 + 설치 파일 빌드
+cd desktop
+npm run dist:mac     # macOS dmg
+npm run dist:win     # Windows nsis
+npm run dist:linux   # Linux AppImage
+# → desktop/release/ 에 산출물
+```
+
+코드 사이닝 / 공증 / CI 매트릭스는 `.plan/05-packaging-distribution.md` 참조.
+
 ### FastAPI Sidecar — 데스크탑 앱 / 외부 클라이언트용
 
 #### 서버 실행
