@@ -1,14 +1,21 @@
-/* v0.1 minimal reset. Tailwind 도입은 04 단계에서. */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 시스템 폰트 + 한국어 가독성 우선. */
+html,
+body,
+#root {
+  height: 100%;
 }
 
-html,
 body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: #fff;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    "Pretendard",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
 }

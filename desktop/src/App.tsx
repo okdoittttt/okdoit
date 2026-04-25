@@ -1,78 +1,80 @@
-import { useEffect, useState } from "react";
+import { useSession } from "@/stores/sessionStore";
+import { useEventStream } from "@/ws/useEventStream";
+import { TaskInput } from "@/components/TaskInput";
+import { StatusBadge } from "@/components/StatusBadge";
+import { PlanChecklist } from "@/components/PlanChecklist";
+import { StepLog } from "@/components/StepLog";
+import { ResultPanel } from "@/components/ResultPanel";
 
 /**
- * v0.1 placeholder UI.
+ * v0.1 1-pane UI.
  *
- * sidecar 와의 연결만 검증한다. 본격 UI(3-pane 레이아웃, 활동 로그, 입력창 등)는
- * 04 단계(`.plan/04-frontend-ui.md`)에서 구현한다.
+ * 위에서 아래 순으로:
+ *   - 상단 바 (제목 + 상태 배지)
+ *   - 작업 입력창 (idle / finished / errored / stopped 일 때만 활성)
+ *   - 계획 체크리스트
+ *   - 실행 로그
+ *   - 결과 / 에러 패널
+ *
+ * 본격 3-pane 레이아웃 (세션 리스트 + 활동 + 브라우저 미리보기) 은 v0.3 / v0.5 이후.
  */
 
-type HealthState =
-  | { status: "loading" }
-  | { status: "ok"; protocolVersion: string }
-  | { status: "error"; message: string };
+const INPUT_ENABLED_STATES = new Set([
+  "idle",
+  "finished",
+  "errored",
+  "stopped",
+]);
 
 export default function App() {
-  const [health, setHealth] = useState<HealthState>({ status: "loading" });
+  const sessionId = useSession((s) => s.sessionId);
+  const status = useSession((s) => s.status);
+  const task = useSession((s) => s.task);
+  const subtasks = useSession((s) => s.subtasks);
+  const activeIndex = useSession((s) => s.activeSubtaskIndex);
+  const steps = useSession((s) => s.steps);
+  const result = useSession((s) => s.result);
+  const error = useSession((s) => s.error);
+  const iterations = useSession((s) => s.iterations);
 
-  useEffect(() => {
-    const url = `${window.okdoit.sidecarUrl}/health`;
-    fetch(url)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        const body = (await res.json()) as { protocol_version: string };
-        setHealth({ status: "ok", protocolVersion: body.protocol_version });
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        setHealth({ status: "error", message });
-      });
-  }, []);
+  useEventStream(sessionId);
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        padding: "32px",
-        color: "#111",
-      }}
-    >
-      <h1 style={{ fontSize: "24px", marginBottom: "8px" }}>okdoit</h1>
-      <p style={{ color: "#666", marginBottom: "24px" }}>
-        v0.1 — sidecar 연결 확인용 placeholder. UI 본체는 04 단계에서.
-      </p>
+    <div className="mx-auto flex h-full max-w-3xl flex-col gap-5 px-6 py-8">
+      <header className="flex items-baseline justify-between border-b border-gray-200 pb-3">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">okdoit</h1>
+          <p className="mt-0.5 text-xs text-gray-500">
+            자연어 목표를 입력하면 브라우저가 알아서 합니다 (v0.1)
+          </p>
+        </div>
+        <StatusBadge status={status} />
+      </header>
 
-      <section
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: "8px",
-          padding: "16px",
-          maxWidth: "480px",
-          background: "#fafafa",
-        }}
-      >
-        <h2 style={{ fontSize: "14px", margin: 0, color: "#888" }}>
-          Sidecar Health
-        </h2>
-        <div style={{ marginTop: "8px" }}>
-          {health.status === "loading" && <code>확인 중…</code>}
-          {health.status === "ok" && (
-            <code style={{ color: "#0a7d28" }}>
-              ✅ ok · protocol {health.protocolVersion}
-            </code>
-          )}
-          {health.status === "error" && (
-            <code style={{ color: "#b00020" }}>
-              ❌ {health.message}
-            </code>
-          )}
-        </div>
-        <div style={{ marginTop: "16px", fontSize: "12px", color: "#888" }}>
-          <div>Sidecar URL: <code>{window.okdoit.sidecarUrl}</code></div>
-          <div>WebSocket URL: <code>{window.okdoit.wsUrl}</code></div>
-          <div>Platform: <code>{window.okdoit.platform}</code></div>
-        </div>
+      <section>
+        <TaskInput enabled={INPUT_ENABLED_STATES.has(status)} />
       </section>
-    </main>
+
+      {task && (
+        <section className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            작업
+          </span>
+          <div className="mt-1 break-words">{task}</div>
+        </section>
+      )}
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold text-gray-700">계획</h2>
+        <PlanChecklist subtasks={subtasks} activeIndex={activeIndex} />
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold text-gray-700">실행 로그</h2>
+        <StepLog steps={steps} />
+      </section>
+
+      <ResultPanel result={result} error={error} iterations={iterations} />
+    </div>
   );
 }
