@@ -219,3 +219,6 @@ desktop/out/
 desktop/dist/
 desktop/.vite/
 desktop/.electron-vite/
+
+.DS_Store
+ **/.DS_Store 

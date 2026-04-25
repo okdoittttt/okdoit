@@ -37,6 +37,7 @@ pyinstaller \
     --collect-all langchain_google_genai \
     --collect-all langchain_ollama \
     --collect-all playwright \
+    --collect-all playwright_stealth \
     --hidden-import uvicorn.logging \
     --hidden-import uvicorn.loops \
     --hidden-import uvicorn.loops.auto \
