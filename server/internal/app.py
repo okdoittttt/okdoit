@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from server.internal.config import get_settings
@@ -69,6 +70,18 @@ def create_app() -> FastAPI:
         title="okdoit-agent-sidecar",
         version=settings.protocol_version,
         lifespan=_lifespan,
+    )
+    # CORS — Electron renderer 의 origin 이 환경마다 다르다:
+    #   dev: http://localhost:5173 (Vite dev 서버)
+    #   prod: file:// 또는 app://  (custom protocol)
+    # sidecar 는 ``127.0.0.1`` only 바인딩이라 외부 origin 자체가 닿지 못한다.
+    # 인증 정보(쿠키 등) 도 받지 않으므로 와일드카드 허용해도 안전.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     register_routes(app)
     # 스크린샷 정적 라우트 — 클라이언트가 ``<img src>`` 로 sidecar 가 보유한 PNG 를

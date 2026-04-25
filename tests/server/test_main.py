@@ -38,6 +38,25 @@ def client(store: SessionStore) -> Iterator[TestClient]:
 # ── REST ────────────────────────────────────────────────────────
 
 
+def test_cors_preflight_passes_for_localhost_origin(client: TestClient) -> None:
+    """CORS preflight 요청에 ``Access-Control-Allow-Origin`` 헤더가 붙어야 한다.
+
+    dev 모드에서 Vite renderer(``http://localhost:5173``) 가 sidecar 와 다른
+    origin 이라 발생한 실제 회귀 케이스(v0.3).
+    """
+    resp = client.options(
+        "/run",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == "*"
+    assert "POST" in resp.headers.get("access-control-allow-methods", "")
+
+
 def test_health_returns_ok(client: TestClient) -> None:
     """``GET /health`` 는 ``status: ok`` 와 ``protocol_version`` 을 돌려준다."""
     resp = client.get("/health")

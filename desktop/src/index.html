@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <title>okdoit</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <!--
+      CSP 메타 태그는 의도적으로 제거. 이유:
+      1) dev: Vite HMR 이 inline script + ws://localhost:5173 을 사용하므로 strict CSP 와 호환 안 됨.
+      2) prod: meta 태그 대신 main process 의 ``session.webRequest.onHeadersReceived`` 로
+         응답 헤더로 주입하는 게 표준 — v0.4 패키징 단계에서 추가 예정.
+      그동안은 ``contextIsolation:true`` + ``nodeIntegration:false`` 가 1차 방어선.
+    -->
   </head>
   <body>
     <div id="root"></div>

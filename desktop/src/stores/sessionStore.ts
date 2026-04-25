@@ -9,6 +9,7 @@
  */
 
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type { ServerEvent, Subtask } from "@/types/events";
 
 // ── 도메인 타입 ────────────────────────────────────────────────
@@ -252,14 +253,27 @@ export const useSessions = create<SessionsState>((set) => ({
 
 // ── selectors ────────────────────────────────────────────────
 
-/** 현재 화면에 보여지는 세션 데이터. 없으면 null. */
+/**
+ * 현재 화면에 보여지는 세션 데이터. 없으면 null.
+ *
+ * 단일 객체 참조 또는 ``null`` 만 돌려주므로 ``Object.is`` 비교만으로 충분 →
+ * ``useShallow`` 불필요.
+ */
 export const useActiveSession = (): SessionData | null =>
   useSessions((s) =>
     s.activeSessionId ? (s.sessions[s.activeSessionId] ?? null) : null,
   );
 
-/** 세션 목록을 ``startedAt`` 내림차순으로 반환. */
+/**
+ * 세션 목록을 ``startedAt`` 내림차순으로 반환한다.
+ *
+ * ``Object.values().sort()`` 가 매 호출마다 새 배열을 만들기 때문에 그대로 두면
+ * ``useSyncExternalStore`` 의 snapshot 안정성 규칙을 어겨 무한 re-render 가 발생한다.
+ * ``useShallow`` 가 결과를 shallow 비교해 캐싱하므로 내용이 같으면 같은 참조를 돌려준다.
+ */
 export const useSessionList = (): SessionData[] =>
-  useSessions((s) =>
-    Object.values(s.sessions).sort((a, b) => b.startedAt - a.startedAt),
+  useSessions(
+    useShallow((s) =>
+      Object.values(s.sessions).sort((a, b) => b.startedAt - a.startedAt),
+    ),
   );

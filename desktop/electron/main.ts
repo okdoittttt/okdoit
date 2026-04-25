@@ -175,6 +175,8 @@ function createMainWindow(): void {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) {
     void mainWindow.loadURL(devUrl);
+    // dev 모드: 디버깅 편의를 위해 DevTools 자동 오픈(detached).
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
