@@ -2,22 +2,36 @@
  * Electron 메인 프로세스 진입점.
  *
  * 책임:
- *   1) Python sidecar (FastAPI) 자식 프로세스를 spawn 한다.
+ *   1) 사용자 설정(LLM 키)을 OS 보안 저장소에서 읽어 sidecar spawn env 에 머지.
+ *   2) Python sidecar (FastAPI) 자식 프로세스를 spawn 한다.
  *      - dev: ``python -m server.main`` (사용자의 venv)
  *      - prod: PyInstaller 로 묶은 ``okdoit-agent`` 실행 파일 (`extraResources` 임베드)
- *   2) sidecar 의 /health 가 200 응답할 때까지 기다린 뒤 BrowserWindow 를 띄운다.
- *   3) 앱 종료 시 sidecar 를 SIGTERM → 일정 시간 후 SIGKILL 로 정리한다.
- *   4) prod 에선 strict CSP 를 응답 헤더로 주입한다(dev 는 Vite HMR 호환을 위해 생략).
+ *   3) sidecar 의 /health 가 200 응답할 때까지 기다린 뒤 BrowserWindow 를 띄운다.
+ *   4) 앱 종료 시 sidecar 를 SIGTERM → 일정 시간 후 SIGKILL 로 정리한다.
+ *   5) prod 에선 strict CSP 를 응답 헤더로 주입한다(dev 는 Vite HMR 호환을 위해 생략).
  *
  * 동적 포트(v0.2) — OS 가 잡아주는 free port 를 sidecar 와 preload 에 모두 전달.
+ *
+ * 설정 미완료 흐름(v0.4 UX):
+ *   - ``settings.isReady()`` 가 false 면 sidecar 를 띄우지 않고 창만 먼저 띄운다.
+ *   - renderer 의 ``SettingsView`` 가 키 입력 → ``okdoit:settings:save`` IPC 호출.
+ *   - main 이 settings 저장 + sidecar 처음 spawn + window reload.
  */
 
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import waitOn from "wait-on";
+
+import {
+  getSettingsView,
+  isReady,
+  loadEnvForSidecar,
+  saveSettings,
+  type SaveSettingsInput,
+} from "./settings.js";
 
 // ── 상수 ───────────────────────────────────────────────────────
 
@@ -45,12 +59,6 @@ const PLAYWRIGHT_BROWSERS_SUBDIR = "playwright-browsers";
 
 /**
  * prod 응답에 부착할 strict CSP. dev 환경(Vite HMR)에서는 절대 사용하지 않는다.
- *
- * 정책:
- *   - default: 'self' 만 (앱 자체 자원)
- *   - connect: localhost / 127.0.0.1 만 (sidecar HTTP + WS)
- *   - img: 'self' + 정적 라우트 + data: (스크린샷 갤러리에 base64 이미지가 들어올 때 대비)
- *   - script/style: 'self' 만 (Vite 가 빌드한 번들)
  */
 const PROD_CSP =
   "default-src 'self'; " +
@@ -74,12 +82,6 @@ let mainWindow: BrowserWindow | null = null;
 
 // ── 유틸 ──────────────────────────────────────────────────────
 
-/**
- * OS 가 자동 할당한 free port 를 잡아 그 번호를 돌려주고 즉시 닫는다.
- *
- * 잡은 후 닫고 spawn 하기까지 짧은 race 가 존재하지만, 로컬호스트 + 즉시 사용
- * 패턴에서는 실제로 충돌이 거의 없다. v0.5 이후 필요하면 retry 로직 추가.
- */
 async function getFreePort(): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const srv = net.createServer();
@@ -101,8 +103,8 @@ async function getFreePort(): Promise<number> {
 /**
  * dev / prod 모드별로 sidecar 실행 명령과 인자를 결정한다.
  *
- * Returns:
- *   ``{ command, args, cwd, env }`` — ``spawn`` 에 그대로 넘길 수 있는 형태.
+ * 반환되는 ``env`` 는 ``process.env`` + sidecar 동적 포트 + (있다면) 사용자가
+ * 저장한 LLM 설정/키를 모두 머지한 결과다.
  */
 function resolveSidecarCommand(port: number): {
   command: string;
@@ -111,8 +113,10 @@ function resolveSidecarCommand(port: number): {
   env: NodeJS.ProcessEnv;
 } {
   const isDev = !app.isPackaged;
+  const userEnv = loadEnvForSidecar() ?? {};
   const baseEnv = {
     ...process.env,
+    ...userEnv,
     OKDOIT_HOST: SIDECAR_HOST,
     OKDOIT_PORT: String(port),
   };
@@ -145,12 +149,6 @@ function resolveSidecarCommand(port: number): {
 
 // ── sidecar 라이프사이클 ───────────────────────────────────────
 
-/**
- * Python sidecar 를 spawn 하고 /health 가 응답할 때까지 기다린다.
- *
- * Args:
- *   port: sidecar 가 바인딩할 포트. ``getFreePort()`` 로 잡은 값.
- */
 async function startSidecar(port: number): Promise<void> {
   const { command, args, cwd, env } = resolveSidecarCommand(port);
 
@@ -178,11 +176,6 @@ async function startSidecar(port: number): Promise<void> {
   });
 }
 
-/**
- * sidecar 에 SIGTERM 을 보내고, 일정 시간 안에 종료되지 않으면 SIGKILL 한다.
- *
- * `before-quit` 핸들러에서 호출된다. 이미 종료됐으면 no-op.
- */
 function stopSidecar(): void {
   if (!sidecar || sidecar.killed) return;
 
@@ -195,13 +188,44 @@ function stopSidecar(): void {
   }, SIDECAR_KILL_GRACE_MS);
 }
 
-// ── 보안 (CSP) ────────────────────────────────────────────────
+/**
+ * sidecar 를 종료하고 ``exit`` 이벤트가 발생할 때까지 기다린다.
+ *
+ * 설정 변경 후 새 환경변수로 재시작할 때 이전 인스턴스가 완전히 죽기 전에
+ * 새 인스턴스를 띄우면 같은 포트 race 또는 dangling Playwright 프로세스가
+ * 생길 수 있어 명시적으로 await 한다.
+ */
+async function stopSidecarAndWait(): Promise<void> {
+  if (!sidecar || sidecar.killed) {
+    sidecar = null;
+    return;
+  }
+  const proc = sidecar;
+  const exited = new Promise<void>((resolve) => {
+    proc.once("exit", () => resolve());
+  });
+  stopSidecar();
+  await exited;
+  sidecar = null;
+}
 
 /**
- * prod 모드에서 모든 응답에 strict CSP 헤더를 부착한다.
+ * 동적 포트 할당 + 환경변수 set + sidecar spawn 의 한 묶음.
  *
- * dev 모드에서는 Vite HMR 의 inline script + ws://localhost:5173 을 깨므로 호출하지 않는다.
+ * 호출 측이 두 번(부팅 / 설정 저장 후 첫 spawn)에서 사용한다.
  */
+async function bootSidecar(): Promise<number> {
+  const port = await getFreePort();
+  // preload 가 ``process.env.OKDOIT_PORT`` 를 읽어 sidecar URL 을 만든다.
+  process.env.OKDOIT_HOST = SIDECAR_HOST;
+  process.env.OKDOIT_PORT = String(port);
+  console.log(`[main] sidecar 포트: ${port}`);
+  await startSidecar(port);
+  return port;
+}
+
+// ── 보안 (CSP) ────────────────────────────────────────────────
+
 function installCsp(): void {
   if (!app.isPackaged) return;
 
@@ -215,14 +239,51 @@ function installCsp(): void {
   });
 }
 
-// ── 윈도우 ────────────────────────────────────────────────────
+// ── IPC (settings) ────────────────────────────────────────────
 
 /**
- * 메인 BrowserWindow 를 만들어 dev 서버 또는 빌드된 renderer 를 로드한다.
+ * Renderer ↔ main IPC 핸들러.
  *
- * dev 모드: electron-vite 가 띄운 Vite dev 서버 URL(`ELECTRON_RENDERER_URL`) 을 로드.
- * prod 모드: 빌드된 `out/renderer/index.html` 을 로드.
+ * - ``okdoit:settings:status`` → 활성 프로바이더에 키가 있는지(``isReady``).
+ * - ``okdoit:settings:get`` → 평문 키 없이 안전한 표현 반환.
+ * - ``okdoit:settings:save`` → 키 저장 + 미부팅 상태였으면 sidecar 처음 띄우고 reload.
  */
+function registerIpc(): void {
+  ipcMain.handle("okdoit:settings:status", () => ({ ready: isReady() }));
+
+  ipcMain.handle("okdoit:settings:get", () => getSettingsView());
+
+  ipcMain.handle(
+    "okdoit:settings:save",
+    async (_event, payload: SaveSettingsInput) => {
+      saveSettings(payload);
+
+      // 활성 프로바이더 키가 부족하면 sidecar 안 띄우고 SettingsView 유지.
+      if (!isReady()) {
+        if (sidecar) await stopSidecarAndWait();
+        return { ok: true, restarted: false };
+      }
+
+      // 첫 입력(spawn) / 변경(restart) 모두 같은 흐름:
+      // 기존 sidecar 죽이고, 새 환경변수로 spawn, renderer reload.
+      try {
+        if (sidecar) await stopSidecarAndWait();
+        await bootSidecar();
+        mainWindow?.webContents.reload();
+        return { ok: true, restarted: true };
+      } catch (err) {
+        console.error("[main] settings 저장 후 sidecar 재시작 실패:", err);
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  );
+}
+
+// ── 윈도우 ────────────────────────────────────────────────────
+
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
@@ -239,7 +300,6 @@ function createMainWindow(): void {
 
   mainWindow.on("ready-to-show", () => mainWindow?.show());
 
-  // 외부 링크는 OS 기본 브라우저로 연다.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
@@ -248,7 +308,6 @@ function createMainWindow(): void {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) {
     void mainWindow.loadURL(devUrl);
-    // dev 모드: 디버깅 편의를 위해 DevTools 자동 오픈(detached).
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
@@ -258,26 +317,25 @@ function createMainWindow(): void {
 // ── 앱 라이프사이클 ────────────────────────────────────────────
 
 void app.whenReady().then(async () => {
-  try {
-    installCsp();
+  installCsp();
+  registerIpc();
 
-    const port = await getFreePort();
-    // preload 가 ``process.env.OKDOIT_PORT`` 를 읽어 sidecar URL 을 만든다.
-    process.env.OKDOIT_HOST = SIDECAR_HOST;
-    process.env.OKDOIT_PORT = String(port);
-    console.log(`[main] sidecar 포트: ${port}`);
-
-    await startSidecar(port);
-  } catch (err) {
-    console.error("[main] sidecar 부팅 실패:", err);
-    app.quit();
-    return;
+  // 설정이 완료된 상태면 바로 sidecar 띄움. 아니면 SettingsView 가 끝나길 기다린다.
+  if (isReady()) {
+    try {
+      await bootSidecar();
+    } catch (err) {
+      console.error("[main] sidecar 부팅 실패:", err);
+      // sidecar 실패해도 창은 띄워서 사용자가 설정을 다시 시도할 수 있게 한다.
+    }
+  } else {
+    console.log("[main] 설정 미완료 — SettingsView 노출 후 사용자 입력 대기");
   }
+
   createMainWindow();
 });
 
 app.on("window-all-closed", () => {
-  // macOS 도 포함해 모든 창이 닫히면 종료한다(데스크탑 앱 기준 단순화).
   app.quit();
 });
 

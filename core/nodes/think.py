@@ -10,8 +10,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from core.context import format_runtime_context_block
 from core.llm import build_llm
 from core.state import AgentState, HistoryItem
+from core.utils.paths import resource_path
 
-_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompt" / "agent.md"
+_PROMPT_PATH = resource_path("prompt", "agent.md")
 
 # ── 컴팩션 상수 ──────────────────────────────────────────────────────────────
 # 프롬프트에 원본으로 노출할 최근 스텝 개수. 이보다 오래된 스텝은 memory 블록에

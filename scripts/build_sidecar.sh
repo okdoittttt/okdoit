@@ -30,6 +30,7 @@ pyinstaller \
     --noconfirm \
     --clean \
     --distpath "${DIST_DIR}" \
+    --add-data "prompt:prompt" \
     --collect-submodules server.internal \
     --collect-all langchain_core \
     --collect-all langgraph \

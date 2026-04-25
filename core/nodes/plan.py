@@ -2,15 +2,15 @@
 
 import json
 import re
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.context import format_runtime_context_block
 from core.llm import build_llm
 from core.state import AgentState
+from core.utils.paths import resource_path
 
-_PLANNER_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompt" / "planner.md"
+_PLANNER_PROMPT_PATH = resource_path("prompt", "planner.md")
 
 
 async def plan(state: AgentState) -> AgentState:

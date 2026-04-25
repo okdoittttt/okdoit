@@ -242,17 +242,23 @@ open desktop/release/okdoit-0.1.0-arm64.dmg
 - 좌상단 🍎 → **시스템 설정** → **개인정보 보호 및 보안**
 - 아래 보안 섹션의 "okdoit 차단" 옆 **"어쨌든 열기"** 클릭 → 비밀번호 / Touch ID
 
-#### 알려진 갭 — API 키 전달 (v0.4 UX 단계에서 해결 예정)
+#### 첫 실행 — API 키 입력
 
-현재 패키징본에는 `.env` 가 동봉되지 않아 LLM 호출 시 키가 없어 실패합니다.
+처음 띄우면 **SettingsView** 가 자동으로 노출됩니다:
 
-**임시 검증법** — Terminal 에서 환경변수 주고 띄우기:
-```bash
-ANTHROPIC_API_KEY=sk-ant-... LLM_PROVIDER=anthropic LLM_MODEL=claude-sonnet-4-6 \
-  open -a "okdoit"
-```
+1. LLM 프로바이더 선택 (Anthropic / Gemini / OpenAI / Ollama)
+2. 모델 이름 입력 (프로바이더별 placeholder 가 보임)
+3. API 키 입력 (Ollama 는 키 불필요, Base URL 만)
+4. **저장하고 시작** 클릭
 
-**정식 해결**: 첫 실행 시 API 키 입력 화면 → OS 키체인 저장 (다음 마일스톤).
+→ 키는 OS 보안 저장소에 암호화 저장 (macOS Keychain / Windows DPAPI / Linux libsecret).
+→ sidecar 가 자동 spawn 되고 페이지가 reload 되어 메인 화면 진입.
+
+**저장 위치 확인 (macOS):**
+- `Keychain Access` 앱 → 검색에 "okdoit"
+- 또는 파일: `~/Library/Application Support/okdoit/settings.json` (암호화된 base64)
+
+**키 변경:** 우상단 ⚙ 버튼 → SettingsView 재방문. 단, 새 키 적용은 **앱 재시작 후** (v0.4 MVP 한정 — 자동 재시작은 v0.5).
 
 #### 빌드 안 되거나 앱이 안 뜰 때
 
@@ -263,6 +269,9 @@ ANTHROPIC_API_KEY=sk-ant-... LLM_PROVIDER=anthropic LLM_MODEL=claude-sonnet-4-6 
 | dmg 는 만들어졌는데 앱 더블클릭하면 즉시 종료 | Terminal 에서 `/Applications/okdoit.app/Contents/MacOS/okdoit` 직접 실행해 콘솔 로그 확인 |
 | 콘솔에 `[sidecar] ...` 찍히지 않음 | sidecar 가 dmg 에 안 들어감. `dist/okdoit-agent/` 가 비어있는지 확인 후 단계 1 재실행 |
 | 콘솔에 `[sidecar] Error loading ASGI app` | (해결됨, v0.4) PyInstaller 가 string import 못 따라가는 문제. `server/main.py` 가 `from server.internal.app import app` 쓰는지 확인 |
+| `FileNotFoundError: ... playwright_stealth/js/...` | (해결됨, v0.4) `--collect-all playwright_stealth` 누락. `scripts/build_sidecar.sh` 에 옵션 있는지 확인 |
+| `[think] Unexpected error: ... 'prompt/agent.md' ...` | (해결됨, v0.4) 데이터 파일 누락. `--add-data "prompt:prompt"` + `core/utils/paths.py:resource_path()` 쓰는지 확인 |
+| 작업 중 `[act] [act] 액션 JSON 파싱 실패: ''` | API 키 누락 또는 LLM 응답 비어 있음. SettingsView 에서 키 다시 확인 |
 
 코드 사이닝 / 공증 / CI 매트릭스 / 자동 업데이트는 `.plan/05-packaging-distribution.md` 참조.
 
@@ -381,9 +390,13 @@ mypy core/ server/
 - **v0.3 멀티 세션** — SessionList 좌측 패널, 멀티 WS 매니저, 세션별 ContextVar 격리, 결과 아티팩트 + 마크다운/JSON 복사
 
 ### 진행 중 🔧
-- **v0.4 패키징** — PyInstaller + electron-builder 빌드 파이프라인 코드 완료. 실제 빌드 검증 + 사이닝 + 첫 실행 UX 진행 예정
+- **v0.4 패키징** — PyInstaller + electron-builder + safeStorage 기반 키 저장 (SettingsView) 코드 완료. 남은 작업:
+  - 패키징본(dmg)에서 first-run UX end-to-end 검증
+  - sidecar 헬스체크 대기 스피너 / 데모 작업 원클릭 (UX 보강)
+  - macOS 사이닝 / 공증 (Apple Developer 가입 후)
+  - CI matrix 빌드 (GitHub Actions)
 
 ### 다음 ⏭
-- **v0.5** — 사전 승인 게이트, Take Over (사용자 직접 제어), BrowserView 임베드, 자동 업데이트
+- **v0.5** — 사전 승인 게이트, Take Over (사용자 직접 제어), BrowserView 임베드, 자동 업데이트, 설정 변경 시 자동 sidecar 재시작
 
 세부 체크리스트는 `.plan/06-roadmap.md` 참조.

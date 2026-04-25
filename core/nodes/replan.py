@@ -11,7 +11,6 @@ verify 또는 think가 ``plan_stale=True`` 신호를 보내거나 모든 subtask
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -20,8 +19,9 @@ from core.context import format_runtime_context_block
 from core.llm import build_llm
 from core.nodes.plan import _parse_subtasks  # 동일 파서 재사용
 from core.state import AgentState, HistoryItem
+from core.utils.paths import resource_path
 
-_REPLANNER_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompt" / "replanner.md"
+_REPLANNER_PROMPT_PATH = resource_path("prompt", "replanner.md")
 
 # replan 입력에 포함할 최근 history_items 개수
 _RECENT_HISTORY_FOR_REPLAN: int = 5
