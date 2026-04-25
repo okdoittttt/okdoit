@@ -189,5 +189,5 @@ pytest tests/test_graph.py -v
 - [x] 스크린샷 기반 관찰 기능
 - [x] DOM 텍스트 트리 파싱
 - [x] Anthropic / Ollama 멀티 프로바이더 지원
-- [ ] FastAPI 서버 래핑
-- [ ] 작업 히스토리 저장 및 재실행
+- [ ] FastAPI 서버 래핑 -> V2
+- [ ] 작업 히스토리 저장 및 재실행 -> V2
