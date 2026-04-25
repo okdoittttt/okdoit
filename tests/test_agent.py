@@ -1,11 +1,9 @@
-import json
 import sys
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from langchain_core.messages import AIMessage
 
 from agent import _print_step, _run
 from core.browser import BrowserManager
@@ -39,14 +37,19 @@ async def reset_singleton():
 # ── _print_step 단위 테스트 ───────────────────────────────────────────────────
 
 def test_print_step_think_outputs_thought_and_action(capsys):
-    """think 노드 출력 시 [Thought]와 [Action]이 출력되는지 확인한다."""
-    msg = AIMessage(content=json.dumps({
-        "thought": "로그인이 필요하다",
-        "action": "로그인 버튼 클릭",
-        "is_done": False,
-        "result": None,
-    }))
-    state = make_state(messages=[msg], last_action="로그인 버튼 클릭")
+    """think 노드 출력 시 [Thought]와 [Action]이 출력되는지 확인한다.
+
+    thought는 history_items[-1]["thought"]에서 읽는다 (단일 진실원).
+    """
+    state = make_state(
+        history_items=[{
+            "step": 1,
+            "thought": "로그인이 필요하다",
+            "action": {"type": "click", "value": "로그인"},
+            "memory_update": None,
+        }],
+        last_action="로그인 버튼 클릭",
+    )
 
     _print_step("think", state)
 
