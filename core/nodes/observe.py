@@ -110,7 +110,8 @@ async def _get_page_metadata(page: Page) -> dict[str, str]:
     title = await page.title()
     url = page.url
     try:
-        description = await page.get_attribute('meta[name="description"]', "content") or ""
+        meta = await page.query_selector('meta[name="description"]')
+        description = (await meta.get_attribute("content") or "") if meta else ""
     except Exception:
         description = ""
     return {"title": title, "url": url, "description": description}

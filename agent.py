@@ -83,15 +83,8 @@ def _print_step(node_name: str, state: AgentState) -> None:
         state: 해당 노드가 반환한 AgentState
     """
     if node_name == "think":
-        last_msg = state.get("messages", [])
-        thought = ""
-        if last_msg:
-            import json
-            try:
-                parsed = json.loads(last_msg[-1].content)
-                thought = parsed.get("thought", "")
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                pass
+        history = state.get("history_items", [])
+        thought = history[-1]["thought"] if history else ""
         print(f"[Thought]      {thought}")
         if not state.get("is_done"):
             print(f"[Action]       {state.get('last_action', '')}")
