@@ -35,7 +35,7 @@ async def act(state: AgentState) -> AgentState:
         return _state_for_failure(state, parse_fail)
 
     try:
-        manager = BrowserManager()
+        manager = BrowserManager.current()
         page = await manager.get_page()
     except RuntimeError as e:
         browser_fail = ActionResult.fail(

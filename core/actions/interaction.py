@@ -92,7 +92,7 @@ async def click(page: Page, action: dict) -> ActionResult:
             if new_pages:
                 new_page = new_pages[-1]
                 await new_page.wait_for_load_state("domcontentloaded")
-                BrowserManager()._page = new_page
+                BrowserManager.current()._page = new_page
             else:
                 await page.wait_for_load_state("domcontentloaded")
             return ActionResult.ok()
@@ -456,7 +456,7 @@ async def click_by_index(page: Page, action: dict) -> ActionResult:
     if new_pages:
         new_page = new_pages[-1]
         await new_page.wait_for_load_state("domcontentloaded")
-        BrowserManager()._page = new_page
+        BrowserManager.current()._page = new_page
     else:
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=5_000)

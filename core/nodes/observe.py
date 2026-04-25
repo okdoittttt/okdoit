@@ -47,7 +47,7 @@ async def observe(state: AgentState) -> AgentState:
         AgentState. 에러 발생 시 error 필드에 메시지를 기록하고 반환한다.
     """
     try:
-        manager = BrowserManager()
+        manager = BrowserManager.current()
         page = await manager.get_page()
 
         filename = f"step_{state['iterations']}.png"
