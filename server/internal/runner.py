@@ -151,6 +151,10 @@ class AgentRunner:
             self._prev_active_subtask = -1
         elif node_name == "observe":
             await self.session.publish(build_step_observed(sid, state))
+            # observe 마다 새 스크린샷이 만들어진다. 아티팩트 응답에서 갤러리로 노출.
+            screenshot = state.get("screenshot_path")
+            if screenshot:
+                self.session.screenshot_paths.append(screenshot)
         elif node_name == "think":
             event = build_step_thinking(sid, state)
             if event is not None:
@@ -205,6 +209,9 @@ class AgentRunner:
         self.session.latest_iterations = iterations
         self.session.latest_result = result_text
         self.session.latest_error = error
+        # 종료 시점의 subtasks / collected_data 를 보존한다(아티팩트 응답용).
+        self.session.latest_subtasks = list(state.get("subtasks") or [])
+        self.session.latest_collected_data = dict(state.get("collected_data") or {})
 
         if error:
             self.session.status = SessionStatus.ERRORED

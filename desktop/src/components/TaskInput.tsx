@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { postRun } from "@/lib/api";
-import { useSession } from "@/stores/sessionStore";
+import { useSessions } from "@/stores/sessionStore";
+import { wsManager } from "@/ws/wsManager";
 
 interface Props {
-  /** 입력 가능 여부. status 가 idle/finished/errored/stopped 일 때만 true. */
+  /** 입력 가능 여부. */
   enabled: boolean;
-  /** controlled value. App 에서 lift up 해 TaskTemplates 와 공유. */
+  /** controlled value. */
   value: string;
   /** value 변경 콜백. */
   onChange: (next: string) => void;
@@ -17,13 +18,13 @@ const SUBMIT_HOTKEY_HINT = "⌘ + Enter 로 전송";
  * 작업 입력창 (controlled).
  *
  * Enter 또는 ``⌘+Enter`` 로 전송. 진행 중에는 비활성화된다. 전송 성공하면
- * ``sessionStore.startSession`` 으로 store 에 sessionId/task 를 박는다 — 그 시점에
- * App 의 ``useEventStream(sessionId)`` 가 WS 를 연다.
+ *   1) ``sessionStore.startSession`` 으로 store 에 새 세션을 박고,
+ *   2) ``wsManager.connect`` 로 WS 연결을 연다.
  */
 export function TaskInput({ enabled, value, onChange }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const startSession = useSession((s) => s.startSession);
+  const startSession = useSessions((s) => s.startSession);
 
   const canSubmit = enabled && !submitting && value.trim().length > 0;
 
@@ -35,6 +36,7 @@ export function TaskInput({ enabled, value, onChange }: Props) {
     try {
       const res = await postRun({ task, headless: false });
       startSession(res.session_id, task);
+      wsManager.connect(res.session_id);
       onChange("");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -256,3 +256,48 @@ async def test_runner_publishes_error_event_when_browser_start_fails() -> None:
     assert len(errored) == 1
     assert "playwright down" in errored[0].error
     assert session.status == SessionStatus.ERRORED
+
+
+@pytest.mark.asyncio
+async def test_runner_accumulates_screenshot_paths_on_observe() -> None:
+    """observe 노드 결과의 screenshot_path 가 ``session.screenshot_paths`` 에 누적된다."""
+    steps = [
+        {"plan": _make_state(subtasks=[{"description": "a", "done": False}])},
+        {"observe": _make_state(iterations=1, screenshot_path="/tmp/step1.png")},
+        {"observe": _make_state(iterations=2, screenshot_path="/tmp/step2.png")},
+        {"observe": _make_state(iterations=3, screenshot_path=None)},  # None 은 무시
+        {"verify": _make_state(iterations=3, is_done=True, result="ok", subtasks=[{"description": "a", "done": True}])},
+    ]
+    session = Session(task="t")
+    runner = AgentRunner(session=session, manager=_fake_manager())
+    with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
+        await runner.run()
+
+    assert session.screenshot_paths == ["/tmp/step1.png", "/tmp/step2.png"]
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_subtasks_and_collected_data_on_finish() -> None:
+    """정상 종료 시 ``latest_subtasks`` / ``latest_collected_data`` 가 보존된다."""
+    final_subtasks = [{"description": "a", "done": True}]
+    collected = {"서울": {"information": "맑음", "collected": True}}
+    steps = [
+        {"plan": _make_state(subtasks=final_subtasks)},
+        {
+            "verify": _make_state(
+                iterations=1,
+                is_done=True,
+                result="끝",
+                subtasks=final_subtasks,
+                collected_data=collected,
+            )
+        },
+    ]
+    session = Session(task="t")
+    runner = AgentRunner(session=session, manager=_fake_manager())
+    with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
+        await runner.run()
+
+    assert session.latest_subtasks == final_subtasks
+    assert session.latest_collected_data == collected
+    assert session.latest_result == "끝"

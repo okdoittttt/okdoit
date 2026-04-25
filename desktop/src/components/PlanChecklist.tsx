@@ -1,12 +1,16 @@
 import { useEffect } from "react";
 import type { Subtask } from "@/types/events";
-import { useSession } from "@/stores/sessionStore";
+import { useSessions } from "@/stores/sessionStore";
 
 const REPLAN_FLASH_DURATION_MS = 1500;
 
 interface Props {
   subtasks: Subtask[];
   activeIndex: number;
+  /** plan.replanned 직후 강조 플래시 여부. */
+  replanFlash: boolean;
+  /** 플래시 끄기 액션을 store 에 디스패치하기 위한 sid. */
+  sessionId: string;
 }
 
 /**
@@ -18,15 +22,17 @@ interface Props {
  *
  * ``replanFlash`` 가 켜지면 잠깐 노란 바를 띄워 사용자에게 계획 변경을 알린다.
  */
-export function PlanChecklist({ subtasks, activeIndex }: Props) {
-  const replanFlash = useSession((s) => s.replanFlash);
-  const clearReplanFlash = useSession((s) => s.clearReplanFlash);
+export function PlanChecklist({ subtasks, activeIndex, replanFlash, sessionId }: Props) {
+  const clearReplanFlash = useSessions((s) => s.clearReplanFlash);
 
   useEffect(() => {
     if (!replanFlash) return;
-    const timer = window.setTimeout(clearReplanFlash, REPLAN_FLASH_DURATION_MS);
+    const timer = window.setTimeout(
+      () => clearReplanFlash(sessionId),
+      REPLAN_FLASH_DURATION_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, [replanFlash, clearReplanFlash]);
+  }, [replanFlash, sessionId, clearReplanFlash]);
 
   if (subtasks.length === 0) {
     return (

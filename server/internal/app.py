@@ -10,15 +10,33 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from server.internal.config import get_settings
 from server.internal.deps import get_session_store
 from server.internal.routes import register_routes
 
 logger = logging.getLogger(__name__)
+
+# 스크린샷 디렉토리 (``core.browser.BrowserManager.screenshot_dir`` 의 기본값과 동일).
+# 절대 경로로 resolve 한 결과를 ``StaticFiles`` 에 전달한다.
+SCREENSHOT_DIR_NAME: str = ".screenshots"
+SCREENSHOT_MOUNT_PATH: str = "/static/screenshots"
+
+
+def _ensure_screenshot_dir() -> Path:
+    """스크린샷 디렉토리가 없으면 만들고 절대 경로를 반환한다.
+
+    Returns:
+        ``.screenshots`` 의 절대 경로(``Path``).
+    """
+    screenshots = Path(SCREENSHOT_DIR_NAME).resolve()
+    screenshots.mkdir(parents=True, exist_ok=True)
+    return screenshots
 
 
 @asynccontextmanager
@@ -53,6 +71,15 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
     register_routes(app)
+    # 스크린샷 정적 라우트 — 클라이언트가 ``<img src>`` 로 sidecar 가 보유한 PNG 를
+    # 직접 띄울 수 있게 한다. 경로 매핑은 ``routes/sessions.py`` 의
+    # ``SCREENSHOT_URL_PREFIX`` 와 동기화한다.
+    screenshots_dir = _ensure_screenshot_dir()
+    app.mount(
+        SCREENSHOT_MOUNT_PATH,
+        StaticFiles(directory=str(screenshots_dir)),
+        name="screenshots",
+    )
     return app
 
 

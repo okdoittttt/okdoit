@@ -1,10 +1,11 @@
 /**
- * 세션 화면 상태를 관리하는 Zustand 스토어.
+ * 세션 상태 store (멀티 세션).
  *
- * 이벤트 적용 로직(``reduceEvent``)은 순수 함수로 분리해 단위 테스트가 쉽다.
- * 스토어 자체는 (a) 새 세션 시작, (b) 이벤트 적용, (c) 리셋 액션을 노출한다.
+ * v0.3 부터 동시에 여러 세션을 다룬다. ``sessions`` 는 ``Record<sessionId, SessionData>``
+ * 형태로 보관하고, ``activeSessionId`` 가 현재 화면에 보여지는 세션을 가리킨다.
  *
- * v0.1 은 단일 세션만 다룬다. 멀티세션 지원(`SessionList`)은 v0.3.
+ * 이벤트 적용 로직(``reduceEvent``)은 한 ``SessionData`` 단위에서 동작하는 순수
+ * 함수로 분리해 단위 테스트가 쉽다. ``applyEvent`` 가 ``event.session_id`` 로 라우팅한다.
  */
 
 import { create } from "zustand";
@@ -33,9 +34,14 @@ export interface StepEntry {
   payload: ServerEvent;
 }
 
-export interface SessionState {
-  sessionId: string | null;
-  task: string | null;
+/**
+ * 단일 세션의 화면 상태.
+ *
+ * 세션이 종료되어도 store 에 그대로 남아 사용자가 좌측에서 다시 열어볼 수 있다.
+ */
+export interface SessionData {
+  id: string;
+  task: string;
   status: SessionStatus;
   subtasks: Subtask[];
   /** ``-1`` 은 active subtask 미정. */
@@ -46,40 +52,37 @@ export interface SessionState {
   result: string | null;
   error: string | null;
   iterations: number;
+  /** 정렬용 unix ms. */
+  startedAt: number;
+}
+
+export interface SessionsState {
+  sessions: Record<string, SessionData>;
+  activeSessionId: string | null;
 
   // ── 액션 ──
   startSession: (sessionId: string, task: string) => void;
+  setActive: (sessionId: string | null) => void;
   applyEvent: (event: ServerEvent) => void;
-  clearReplanFlash: () => void;
+  clearReplanFlash: (sessionId: string) => void;
+  removeSession: (sessionId: string) => void;
   reset: () => void;
 }
-
-const INITIAL: Omit<
-  SessionState,
-  "startSession" | "applyEvent" | "clearReplanFlash" | "reset"
-> = {
-  sessionId: null,
-  task: null,
-  status: "idle",
-  subtasks: [],
-  activeSubtaskIndex: -1,
-  steps: [],
-  replanFlash: false,
-  result: null,
-  error: null,
-  iterations: 0,
-};
 
 // ── reducer (순수 함수) ────────────────────────────────────────
 
 let nextStepId = 1;
 
 /**
- * ``ServerEvent`` 를 받아 state 를 변환한다. 부수효과 없음(zustand set 함수가 호출).
+ * ``ServerEvent`` 를 받아 ``SessionData`` 변환분을 돌려준다(부수효과 없음).
  *
- * 새 이벤트 타입이 생기면 여기에 case 한 줄을 추가하면 된다.
+ * 새 이벤트 타입이 생기면 여기에 case 한 줄을 추가하면 된다 — exhaustive 검사가
+ * 누락을 컴파일 타임에 잡아준다.
  */
-export function reduceEvent(state: SessionState, event: ServerEvent): Partial<SessionState> {
+export function reduceEvent(
+  data: SessionData,
+  event: ServerEvent,
+): Partial<SessionData> {
   switch (event.type) {
     case "session.started":
       return { status: "running", task: event.task };
@@ -118,25 +121,25 @@ export function reduceEvent(state: SessionState, event: ServerEvent): Partial<Se
 
     case "step.thinking":
       return {
-        steps: [...state.steps, makeStep(event, "thinking", thinkingSummary(event))],
+        steps: [...data.steps, makeStep(event, "thinking", thinkingSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.acted":
       return {
-        steps: [...state.steps, makeStep(event, "acted", actedSummary(event))],
+        steps: [...data.steps, makeStep(event, "acted", actedSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.observed":
       return {
-        steps: [...state.steps, makeStep(event, "observed", observedSummary(event))],
+        steps: [...data.steps, makeStep(event, "observed", observedSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.verified":
       return {
-        steps: [...state.steps, makeStep(event, "verified", verifiedSummary(event))],
+        steps: [...data.steps, makeStep(event, "verified", verifiedSummary(event))],
         iterations: event.iteration,
       };
   }
@@ -176,17 +179,87 @@ function verifiedSummary(e: { is_done: boolean; consecutive_errors: number }): s
   return "계속";
 }
 
+// ── 새 SessionData 팩토리 ──────────────────────────────────────
+
+function newSessionData(sessionId: string, task: string): SessionData {
+  return {
+    id: sessionId,
+    task,
+    status: "running",
+    subtasks: [],
+    activeSubtaskIndex: -1,
+    steps: [],
+    replanFlash: false,
+    result: null,
+    error: null,
+    iterations: 0,
+    startedAt: Date.now(),
+  };
+}
+
 // ── 스토어 ────────────────────────────────────────────────────
 
-export const useSession = create<SessionState>((set) => ({
-  ...INITIAL,
+export const useSessions = create<SessionsState>((set) => ({
+  sessions: {},
+  activeSessionId: null,
 
   startSession: (sessionId, task) =>
-    set({ ...INITIAL, sessionId, task, status: "running" }),
+    set((s) => ({
+      sessions: {
+        ...s.sessions,
+        [sessionId]: newSessionData(sessionId, task),
+      },
+      activeSessionId: sessionId,
+    })),
 
-  applyEvent: (event) => set((s) => reduceEvent(s, event)),
+  setActive: (sessionId) => set({ activeSessionId: sessionId }),
 
-  clearReplanFlash: () => set({ replanFlash: false }),
+  applyEvent: (event) =>
+    set((s) => {
+      const sid = event.session_id;
+      const current = s.sessions[sid];
+      if (!current) return s;
+      const update = reduceEvent(current, event);
+      return {
+        sessions: {
+          ...s.sessions,
+          [sid]: { ...current, ...update },
+        },
+      };
+    }),
 
-  reset: () => set({ ...INITIAL }),
+  clearReplanFlash: (sessionId) =>
+    set((s) => {
+      const current = s.sessions[sessionId];
+      if (!current) return s;
+      return {
+        sessions: {
+          ...s.sessions,
+          [sessionId]: { ...current, replanFlash: false },
+        },
+      };
+    }),
+
+  removeSession: (sessionId) =>
+    set((s) => {
+      const { [sessionId]: _removed, ...rest } = s.sessions;
+      const nextActive = s.activeSessionId === sessionId ? null : s.activeSessionId;
+      return { sessions: rest, activeSessionId: nextActive };
+    }),
+
+  reset: () => set({ sessions: {}, activeSessionId: null }),
 }));
+
+// ── selectors ────────────────────────────────────────────────
+
+/** 현재 화면에 보여지는 세션 데이터. 없으면 null. */
+export const useActiveSession = (): SessionData | null =>
+  useSessions((s) =>
+    s.activeSessionId ? (s.sessions[s.activeSessionId] ?? null) : null,
+  );
+
+/** 세션 목록을 ``startedAt`` 내림차순으로 반환. */
+export const useSessionList = (): SessionData[] =>
+  useSessions((s) =>
+    Object.values(s.sessions).sort((a, b) => b.startedAt - a.startedAt),
+  );

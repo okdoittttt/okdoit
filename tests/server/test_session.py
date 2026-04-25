@@ -119,3 +119,11 @@ def test_store_create_get_remove() -> None:
     assert s in store.list_all()
     store.remove(s.id)
     assert store.get(s.id) is None
+
+
+def test_session_artifact_fields_default_empty() -> None:
+    """v0.3 에서 추가된 아티팩트용 필드는 초기에 비어 있어야 한다."""
+    s = Session(task="t")
+    assert s.latest_subtasks == []
+    assert s.latest_collected_data == {}
+    assert s.screenshot_paths == []

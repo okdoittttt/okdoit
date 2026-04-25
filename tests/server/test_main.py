@@ -172,3 +172,41 @@ def test_websocket_unknown_session_closes(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/sessions/no-such/events") as ws:
             ws.receive_text()
+
+
+# ── 아티팩트 (v0.3) ─────────────────────────────────────────────
+
+
+def test_artifact_returns_collected_fields(
+    client: TestClient, store: SessionStore
+) -> None:
+    """``GET /sessions/{id}/artifact`` 가 보존된 필드 + 스크린샷 URL 을 돌려준다."""
+    s = store.create(task="t")
+    s.status = SessionStatus.FINISHED
+    s.latest_iterations = 3
+    s.latest_result = "끝"
+    s.latest_subtasks = [{"description": "a", "done": True}]
+    s.latest_collected_data = {"서울": {"information": "맑음", "collected": True}}
+    s.screenshot_paths = ["/abs/path/step1.png", "/abs/path/step2.png"]
+
+    resp = client.get(f"/sessions/{s.id}/artifact")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == s.id
+    assert body["task"] == "t"
+    assert body["status"] == "finished"
+    assert body["iterations"] == 3
+    assert body["result"] == "끝"
+    assert body["subtasks"] == [{"description": "a", "done": True}]
+    assert body["collected_data"]["서울"]["information"] == "맑음"
+    # 스크린샷은 정적 라우트 URL 로 변환됨 (basename 만 남음).
+    assert body["screenshots"] == [
+        "/static/screenshots/step1.png",
+        "/static/screenshots/step2.png",
+    ]
+
+
+def test_artifact_returns_404_for_unknown_session(client: TestClient) -> None:
+    """존재하지 않는 세션의 아티팩트 요청은 404."""
+    resp = client.get("/sessions/no-such/artifact")
+    assert resp.status_code == 404

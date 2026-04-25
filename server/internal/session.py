@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -77,6 +77,9 @@ class Session:
         latest_iterations: 가장 최근 ``AgentState["iterations"]`` 값(스냅샷용).
         latest_result: 종료 시 결과 텍스트.
         latest_error: 에러 발생 시 메시지.
+        latest_subtasks: 종료 시점의 ``AgentState["subtasks"]`` 사본. 아티팩트 응답용.
+        latest_collected_data: 종료 시점의 ``AgentState["collected_data"]`` 사본.
+        screenshot_paths: observe 노드 실행 때마다 누적된 스크린샷 절대 경로 목록.
     """
 
     def __init__(self, task: str, session_id: Optional[str] = None) -> None:
@@ -98,6 +101,9 @@ class Session:
         self.latest_iterations: int = 0
         self.latest_result: Optional[str] = None
         self.latest_error: Optional[str] = None
+        self.latest_subtasks: list[dict[str, Any]] = []
+        self.latest_collected_data: dict[str, dict[str, Any]] = {}
+        self.screenshot_paths: list[str] = []
 
     # ── 이벤트 발행 / 수신 ──────────────────────────────────────
 

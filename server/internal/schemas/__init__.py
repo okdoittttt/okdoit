@@ -4,6 +4,7 @@
 계약이고, 이벤트는 WS 프로토콜의 일부라 라이프사이클이 다르다.
 """
 
+from server.internal.schemas.artifact import SessionArtifact
 from server.internal.schemas.requests import (
     HealthResponse,
     OkResponse,
@@ -16,4 +17,5 @@ __all__ = [
     "OkResponse",
     "RunRequest",
     "RunResponse",
+    "SessionArtifact",
 ]
