@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from fastapi import APIRouter, Depends, status
 
@@ -16,6 +17,10 @@ from server.internal.session import SessionStore
 
 logger = logging.getLogger(__name__)
 
+# 스크린샷 루트 디렉토리. 세션마다 ``<root>/<session_id>/`` sub-dir 에 저장한다.
+# ``server.internal.app`` 의 ``SCREENSHOT_DIR_NAME`` 과 동기화.
+SCREENSHOT_ROOT: str = ".screenshots"
+
 router = APIRouter(tags=["run"])
 
 
@@ -27,6 +32,9 @@ async def run_task(
 ) -> RunResponse:
     """새 세션을 만들고 ``AgentRunner`` 를 백그라운드 태스크로 띄운다.
 
+    스크린샷은 ``.screenshots/<session_id>/`` 안에 저장한다 — 세션 간 파일명
+    충돌(서로의 ``step_N.png`` 를 덮어 써 ResultPanel 갤러리가 섞이는 문제) 방지.
+
     Args:
         req: ``RunRequest``.
         settings: 주입된 sidecar 설정.
@@ -37,7 +45,8 @@ async def run_task(
     """
     headless = req.headless if req.headless is not None else settings.headless_default
     session = store.create(task=req.task)
-    manager = BrowserManager(headless=headless)
+    screenshot_dir = os.path.join(SCREENSHOT_ROOT, session.id)
+    manager = BrowserManager(headless=headless, screenshot_dir=screenshot_dir)
     runner = AgentRunner(session=session, manager=manager)
 
     asyncio.create_task(runner.run(), name=f"agent-runner-{session.id}")

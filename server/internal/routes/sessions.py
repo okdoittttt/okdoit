@@ -14,6 +14,10 @@ from server.internal.session import Session, SessionSnapshot, SessionStatus, Ses
 # 정적 라우트 prefix. ``app.py`` 의 ``StaticFiles`` 마운트 경로와 동기화해야 한다.
 SCREENSHOT_URL_PREFIX: str = "/static/screenshots"
 
+# 스크린샷 파일이 저장되는 루트 디렉토리. ``StaticFiles`` 가 마운트하는 디렉토리와
+# 동일하며, URL 변환의 기준점으로 쓴다. ``app.py`` / ``routes/run.py`` 와 동기화.
+_SCREENSHOT_ROOT: Path = Path(".screenshots").resolve()
+
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
@@ -109,13 +113,24 @@ async def get_session_artifact(
 
 
 def _to_screenshot_url(path: str) -> str:
-    """절대 경로를 정적 라우트 URL 로 변환한다.
+    """스크린샷 절대 경로를 정적 라우트 URL 로 변환한다.
+
+    가능한 경우 ``.screenshots/`` 루트 기준 상대 경로를 그대로 URL 에 옮겨
+    sub-dir 정보를 보존한다(예: ``.screenshots/<sid>/step_1.png`` →
+    ``/static/screenshots/<sid>/step_1.png``). 루트 밖의 경로면 basename 만 사용해
+    fallback 한다.
 
     Args:
         path: 스크린샷 파일의 sidecar 로컬 경로.
 
     Returns:
-        ``/static/screenshots/<basename>`` 형태의 상대 URL. 클라이언트가 sidecar
-        베이스 URL 과 합쳐서 ``http://127.0.0.1:PORT/static/screenshots/...`` 로 사용.
+        ``/static/screenshots/...`` 형태의 상대 URL. 클라이언트가 sidecar 베이스
+        URL 과 합쳐서 ``http://127.0.0.1:PORT/static/screenshots/...`` 로 사용.
     """
-    return f"{SCREENSHOT_URL_PREFIX}/{Path(path).name}"
+    abs_path = Path(path).resolve()
+    try:
+        rel = abs_path.relative_to(_SCREENSHOT_ROOT)
+    except ValueError:
+        # ``.screenshots/`` 루트 밖이면 sub-dir 정보를 알 수 없으니 basename 만 사용.
+        rel = Path(abs_path.name)
+    return f"{SCREENSHOT_URL_PREFIX}/{rel.as_posix()}"
