@@ -67,6 +67,10 @@ class AgentRunner:
     async def run(self) -> None:
         """그래프를 스트리밍 실행하면서 이벤트를 발행한다.
 
+        ``manager.start()`` 가 자동으로 현재 task 에 bind 해서 그래프 노드들이
+        ``BrowserManager.current()`` 로 같은 인스턴스를 본다. ``asyncio.create_task``
+        가 부모 context 를 copy 하므로 다른 세션 task 와 자동 격리된다.
+
         예외는 잡아서 ``SessionErrored`` 로 변환하고, 어떤 경우에도 브라우저가
         정리되도록 ``finally`` 에서 ``manager.stop()`` 을 호출한다. 마지막에는
         WS 가 깨끗하게 빠지도록 ``session.close_stream()`` 을 호출한다.

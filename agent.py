@@ -40,6 +40,9 @@ def main() -> None:
 async def _run(task: str, manager: BrowserManager) -> None:
     """그래프를 스트리밍으로 실행하고 매 스텝 결과를 출력한다.
 
+    ``manager.start()`` 가 자동으로 현재 task 에 bind 해서 그래프 노드들이
+    ``BrowserManager.current()`` 로 같은 인스턴스를 본다.
+
     Args:
         task: 수행할 태스크 문자열
         manager: 초기화된 BrowserManager 인스턴스
