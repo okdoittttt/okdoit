@@ -1,3 +1,8 @@
+
+
+https://github.com/user-attachments/assets/96c01812-978b-4984-b5c3-75b561eea04d
+
+
 # okdoit
 
 > 자연어 목표를 입력하면, AI가 브라우저를 직접 조작해 결과를 가져옵니다.
