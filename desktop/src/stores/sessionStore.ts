@@ -4,13 +4,30 @@
  * v0.3 부터 동시에 여러 세션을 다룬다. ``sessions`` 는 ``Record<sessionId, SessionData>``
  * 형태로 보관하고, ``activeSessionId`` 가 현재 화면에 보여지는 세션을 가리킨다.
  *
+ * v0.5 부터 step 의 ``kind`` 가 design 시안과 1:1 로 정렬된다 — 4가지였던
+ * ``thinking|acted|observed|verified`` 가 ``think|act|observe|verify`` 로 짧아졌고,
+ * ``plan`` / ``success`` / ``error`` 가 추가되었다. ``plan`` 은 ``PlanCreated`` /
+ * ``PlanReplanned`` 에서, ``success`` 는 ``SessionFinished`` 에서, ``error`` 는
+ * ``SessionErrored`` 에서 만든다.
+ *
  * 이벤트 적용 로직(``reduceEvent``)은 한 ``SessionData`` 단위에서 동작하는 순수
  * 함수로 분리해 단위 테스트가 쉽다. ``applyEvent`` 가 ``event.session_id`` 로 라우팅한다.
  */
 
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import type { ServerEvent, Subtask } from "@/types/events";
+import type {
+  PlanCreated,
+  PlanReplanned,
+  ServerEvent,
+  SessionErrored,
+  SessionFinished,
+  StepActed,
+  StepObserved,
+  StepThinking,
+  StepVerified,
+  Subtask,
+} from "@/types/events";
 
 // ── 도메인 타입 ────────────────────────────────────────────────
 
@@ -22,16 +39,27 @@ export type SessionStatus =
   | "errored"
   | "stopped";
 
-export type StepKind = "thinking" | "acted" | "observed" | "verified";
+/** 활동 로그 카드의 종류. design/app.jsx 의 step.kind 와 동일. */
+export type StepKind =
+  | "plan"
+  | "observe"
+  | "think"
+  | "act"
+  | "verify"
+  | "success"
+  | "error";
 
 export interface StepEntry {
-  /** ts 와 함께 정렬 키로 쓰이는 단조 증가 ID. */
+  /** ``ts`` 와 함께 정렬 키로 쓰이는 단조 증가 ID. */
   id: number;
+  /** 백엔드 iteration 번호. lifecycle 이벤트(plan/success/error)는 0. */
   iteration: number;
   kind: StepKind;
-  /** 화면에 한 줄로 보여줄 요약 텍스트. */
+  /** 이벤트 ts(ISO). 카드 헤더의 경과 시간 표시에 사용. */
+  ts: string;
+  /** 카드 한 줄 요약(클립보드 복사 등에 사용). */
   summary: string;
-  /** 원본 페이로드(상세 펼치기 용). */
+  /** 원본 페이로드. 카드 본문이 narrowing 으로 다시 읽는다. */
   payload: ServerEvent;
 }
 
@@ -53,7 +81,7 @@ export interface SessionData {
   result: string | null;
   error: string | null;
   iterations: number;
-  /** 정렬용 unix ms. */
+  /** 정렬용 unix ms. 화면의 elapsed 표시에도 사용. */
   startedAt: number;
 }
 
@@ -77,7 +105,7 @@ let nextStepId = 1;
 /**
  * ``ServerEvent`` 를 받아 ``SessionData`` 변환분을 돌려준다(부수효과 없음).
  *
- * 새 이벤트 타입이 생기면 여기에 case 한 줄을 추가하면 된다 — exhaustive 검사가
+ * 이벤트가 추가되면 여기에 case 한 줄을 추가하면 된다 — exhaustive 검사가
  * 누락을 컴파일 타임에 잡아준다.
  */
 export function reduceEvent(
@@ -93,10 +121,15 @@ export function reduceEvent(
         status: "finished",
         result: event.result,
         iterations: event.iterations,
+        steps: [...data.steps, makeStep(event, "success", successSummary(event))],
       };
 
     case "session.errored":
-      return { status: "errored", error: event.error };
+      return {
+        status: "errored",
+        error: event.error,
+        steps: [...data.steps, makeStep(event, "error", errorSummary(event))],
+      };
 
     case "session.paused":
       return { status: "paused" };
@@ -108,13 +141,18 @@ export function reduceEvent(
       return { status: "stopped" };
 
     case "plan.created":
-      return { subtasks: event.subtasks, activeSubtaskIndex: 0 };
+      return {
+        subtasks: event.subtasks,
+        activeSubtaskIndex: 0,
+        steps: [...data.steps, makeStep(event, "plan", planSummary(event))],
+      };
 
     case "plan.replanned":
       return {
         subtasks: event.subtasks,
         activeSubtaskIndex: 0,
         replanFlash: true,
+        steps: [...data.steps, makeStep(event, "plan", replanSummary(event))],
       };
 
     case "subtask.activated":
@@ -122,25 +160,25 @@ export function reduceEvent(
 
     case "step.thinking":
       return {
-        steps: [...data.steps, makeStep(event, "thinking", thinkingSummary(event))],
+        steps: [...data.steps, makeStep(event, "think", thinkingSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.acted":
       return {
-        steps: [...data.steps, makeStep(event, "acted", actedSummary(event))],
+        steps: [...data.steps, makeStep(event, "act", actedSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.observed":
       return {
-        steps: [...data.steps, makeStep(event, "observed", observedSummary(event))],
+        steps: [...data.steps, makeStep(event, "observe", observedSummary(event))],
         iterations: event.iteration,
       };
 
     case "step.verified":
       return {
-        steps: [...data.steps, makeStep(event, "verified", verifiedSummary(event))],
+        steps: [...data.steps, makeStep(event, "verify", verifiedSummary(event))],
         iterations: event.iteration,
       };
   }
@@ -153,31 +191,60 @@ function makeStep(
   kind: StepKind,
   summary: string,
 ): StepEntry {
-  // step.* 만 makeStep 으로 들어오므로 ``iteration`` 이 존재한다.
-  const iteration = (event as { iteration: number }).iteration;
-  return { id: nextStepId++, iteration, kind, summary, payload: event };
+  // step.* 만 ``iteration`` 을 가진다. 라이프사이클 이벤트는 0 으로 둔다.
+  const iteration =
+    "iteration" in event && typeof event.iteration === "number"
+      ? event.iteration
+      : 0;
+  return {
+    id: nextStepId++,
+    iteration,
+    kind,
+    ts: event.ts,
+    summary,
+    payload: event,
+  };
 }
 
-function thinkingSummary(e: { thought: string; action: Record<string, unknown> }): string {
-  const actionName = typeof e.action.name === "string" ? e.action.name : "?";
+function planSummary(e: PlanCreated): string {
+  return `Plan with ${e.subtasks.length} subtask${e.subtasks.length === 1 ? "" : "s"}`;
+}
+
+function replanSummary(e: PlanReplanned): string {
+  return `Replanned (${e.replan_count}): ${e.reason}`;
+}
+
+function successSummary(e: SessionFinished): string {
+  return e.result ?? "(no result)";
+}
+
+function errorSummary(e: SessionErrored): string {
+  return e.error;
+}
+
+function thinkingSummary(e: StepThinking): string {
+  const actionName =
+    typeof e.action.name === "string" ? e.action.name : "?";
   const thought = e.thought.length > 80 ? `${e.thought.slice(0, 80)}…` : e.thought;
   return `${thought}  →  ${actionName}`;
 }
 
-function actedSummary(e: { action: string; success: boolean; error_message: string | null }): string {
+function actedSummary(e: StepActed): string {
   if (e.success) return `✓ ${e.action}`;
-  return `✗ ${e.action} — ${e.error_message ?? "(원인 불명)"}`;
+  return `✗ ${e.action} — ${e.error_message ?? "(unknown cause)"}`;
 }
 
-function observedSummary(e: { current_url: string; interactive_count: number }): string {
-  const url = e.current_url || "(빈 페이지)";
-  return `${url}  ·  요소 ${e.interactive_count}개`;
+function observedSummary(e: StepObserved): string {
+  const url = e.current_url || "(blank page)";
+  return `${url}  ·  ${e.interactive_count} elements`;
 }
 
-function verifiedSummary(e: { is_done: boolean; consecutive_errors: number }): string {
-  if (e.is_done) return "종료 판정";
-  if (e.consecutive_errors > 0) return `계속 (연속 에러 ${e.consecutive_errors})`;
-  return "계속";
+function verifiedSummary(e: StepVerified): string {
+  if (e.is_done) return "Done";
+  if (e.consecutive_errors > 0) {
+    return `Continuing (${e.consecutive_errors} consecutive errors)`;
+  }
+  return "Continuing";
 }
 
 // ── 새 SessionData 팩토리 ──────────────────────────────────────
@@ -244,7 +311,8 @@ export const useSessions = create<SessionsState>((set) => ({
   removeSession: (sessionId) =>
     set((s) => {
       const { [sessionId]: _removed, ...rest } = s.sessions;
-      const nextActive = s.activeSessionId === sessionId ? null : s.activeSessionId;
+      const nextActive =
+        s.activeSessionId === sessionId ? null : s.activeSessionId;
       return { sessions: rest, activeSessionId: nextActive };
     }),
 

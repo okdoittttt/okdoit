@@ -13,9 +13,8 @@
     "resolveJsonModule": true,
     "useDefineForClassFields": true,
     "isolatedModules": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "types": ["vite/client"]
   },
