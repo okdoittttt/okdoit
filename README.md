@@ -249,12 +249,12 @@ open desktop/release/okdoit-0.1.0-arm64.dmg
 
 #### 첫 실행 — API 키 입력
 
-처음 띄우면 **SettingsView** 가 자동으로 노출됩니다:
+처음 띄우면 풀스크린 **SettingsView** 가 자동으로 노출됩니다:
 
 1. LLM 프로바이더 선택 (Anthropic / Gemini / OpenAI / Ollama)
 2. 모델 이름 입력 (프로바이더별 placeholder 가 보임)
 3. API 키 입력 (Ollama 는 키 불필요, Base URL 만)
-4. **저장하고 시작** 클릭
+4. **Save & Launch** 클릭
 
 → 키는 OS 보안 저장소에 암호화 저장 (macOS Keychain / Windows DPAPI / Linux libsecret).
 → sidecar 가 자동 spawn 되고 페이지가 reload 되어 메인 화면 진입.
@@ -263,7 +263,7 @@ open desktop/release/okdoit-0.1.0-arm64.dmg
 - `Keychain Access` 앱 → 검색에 "okdoit"
 - 또는 파일: `~/Library/Application Support/okdoit/settings.json` (암호화된 base64)
 
-**키 변경:** 우상단 ⚙ 버튼 → SettingsView 재방문. 단, 새 키 적용은 **앱 재시작 후** (v0.4 MVP 한정 — 자동 재시작은 v0.5).
+**키 변경:** 타이틀바 우측 ⚙ 버튼 → **SettingsModal** 이 떠서 수정. 저장 시 sidecar 가 자동으로 재시작되고 렌더러도 reload 됩니다.
 
 #### 빌드 안 되거나 앱이 안 뜰 때
 
@@ -393,6 +393,7 @@ mypy core/ server/
 - **v0.1 데스크탑 앱** — Electron + React + Tailwind, 1-pane 활동 로그 UI
 - **v0.2 개입 UI** — ControlButtons, StatusBadge, 작업 템플릿 카드
 - **v0.3 멀티 세션** — SessionList 좌측 패널, 멀티 WS 매니저, 세션별 ContextVar 격리, 결과 아티팩트 + 마크다운/JSON 복사
+- **v0.5 UI 리뉴얼** — Claude Design 프로토타입 기반 3-패널 다크 테마(SessionList / CenterPane / ResultPane), 7가지 step 카드(PLAN / OBSERVE / THINK / ACT / VERIFY / SUCCESS / ERROR), Markdown / JSON / Screenshots 3탭 결과 패널 + 최신 스크린샷 미리보기, 디자인 토큰 모듈(`styles/tokens.ts`), 첫 실행 풀스크린 SettingsView + 편집 모드 SettingsModal, 설정 저장 시 sidecar 자동 재시작
 
 ### 진행 중 🔧
 - **v0.4 패키징** — PyInstaller + electron-builder + safeStorage 기반 키 저장 (SettingsView) 코드 완료. 남은 작업:
@@ -402,6 +403,6 @@ mypy core/ server/
   - CI matrix 빌드 (GitHub Actions)
 
 ### 다음 ⏭
-- **v0.5** — 사전 승인 게이트, Take Over (사용자 직접 제어), BrowserView 임베드, 자동 업데이트, 설정 변경 시 자동 sidecar 재시작
+- **v0.6** — 사전 승인 게이트, Take Over (사용자 직접 제어), BrowserView 임베드, 자동 업데이트
 
 세부 체크리스트는 `.plan/06-roadmap.md` 참조.
