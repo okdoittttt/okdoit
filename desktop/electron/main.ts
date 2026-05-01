@@ -51,6 +51,13 @@ const SIDECAR_HOST = "127.0.0.1";
 /** PyInstaller 산출물 디렉토리(``extraResources`` 안). */
 const SIDECAR_BIN_DIR = "sidecar";
 
+/**
+ * dev 모드에서 sidecar 가 데이터(SQLite, 스크린샷)를 쓰는 디렉토리 이름.
+ * ``PROJECT_ROOT/.okdoit-dev`` 가 되며 ``.gitignore`` 에 등록돼 있어야 한다.
+ * prod 에서는 사용하지 않음(``app.getPath("userData")`` 가 OS 표준 경로 결정).
+ */
+const DEV_DATA_DIR_NAME = ".okdoit-dev";
+
 /** PyInstaller 가 만든 실행 파일 이름(``scripts/build_sidecar.sh`` 의 --name 과 동기화). */
 const SIDECAR_BIN_NAME = process.platform === "win32" ? "okdoit-agent.exe" : "okdoit-agent";
 
@@ -114,11 +121,20 @@ function resolveSidecarCommand(port: number): {
 } {
   const isDev = !app.isPackaged;
   const userEnv = loadEnvForSidecar() ?? {};
+
+  // sidecar 의 모든 파일 I/O(스크린샷, SQLite DB) 기준 디렉토리.
+  // dev 는 PROJECT_ROOT/.okdoit-dev 로 격리해서 프로젝트 루트 오염 방지,
+  // prod 는 OS 표준 userData 경로(`~/Library/Application Support/okdoit` 등).
+  const dataDir = isDev
+    ? path.join(PROJECT_ROOT, DEV_DATA_DIR_NAME)
+    : app.getPath("userData");
+
   const baseEnv = {
     ...process.env,
     ...userEnv,
     OKDOIT_HOST: SIDECAR_HOST,
     OKDOIT_PORT: String(port),
+    OKDOIT_DATA_DIR: dataDir,
   };
 
   if (isDev) {
