@@ -42,6 +42,7 @@ __all__ = [
     "StepThinking",
     "StepVerified",
     "SubtaskActivated",
+    "WireMessage",
     "utcnow_iso",
 ]
 
@@ -82,4 +83,20 @@ class ServerEventEnvelope(BaseModel):
             판별되어 역직렬화된다.
     """
 
+    event: ServerEvent
+
+
+class WireMessage(BaseModel):
+    """WebSocket 송수신용 transport envelope — ``seq`` + ``event`` 페이로드.
+
+    이벤트 자체에는 transport-level 메타(seq) 를 두지 않는다. 클라이언트가 마지막
+    수신값을 기억해 재연결 시 ``?since_seq=<seq>`` 로 보내면 sidecar 가 누락분을
+    DB 에서 꺼내 replay 한다(단계 04).
+
+    Attributes:
+        seq: 세션 내 단조 증가 번호. ``Session._seq`` 카운터가 부여한다.
+        event: ``ServerEvent`` 합집합 중 하나. ``type`` 리터럴로 판별.
+    """
+
+    seq: int
     event: ServerEvent

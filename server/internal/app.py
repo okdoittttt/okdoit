@@ -26,6 +26,10 @@ from server.internal.storage import (
     open_connection,
     schema_sql_path,
 )
+from server.internal.storage.repositories import SessionRepository
+
+# stale RUNNING / PAUSED row 를 정리할 때 ``error`` 컬럼에 채울 메시지.
+_STALE_CLEANUP_MESSAGE: str = "sidecar restart"
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,11 @@ async def _lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     conn = open_connection(settings.db_path)
     try:
         storage_migrations.apply(conn)
+        # 직전 sidecar 가 강제 종료됐을 수 있으므로 RUNNING / PAUSED row 를
+        # ERRORED 로 정리한다 — 사용자에게 stale 활성 세션이 보이는 걸 막는다.
+        cleaned = SessionRepository(conn).cleanup_stale_active(_STALE_CLEANUP_MESSAGE)
+        if cleaned > 0:
+            logger.info("stale 활성 세션 %d 건을 ERRORED 로 정리", cleaned)
     finally:
         conn.close()
 
@@ -73,8 +82,8 @@ async def _lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     try:
         yield
     finally:
-        logger.info("sidecar 종료 — 잔여 세션 정리")
-        for session in get_session_store().list_all():
+        logger.info("sidecar 종료 — 활성 세션 정리")
+        for session in get_session_store().list_active():
             session.request_stop()
 
 

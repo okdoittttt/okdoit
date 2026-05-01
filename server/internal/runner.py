@@ -1,18 +1,17 @@
 """LangGraph 에이전트를 한 세션 단위로 실행하고 단계별 이벤트를 발행한다.
 
-``agent.py:_run`` 의 책임을 ``AgentRunner`` 클래스로 옮긴 것이다. 차이점:
-    - ``print`` 대신 ``Session.publish(...)`` 로 구조화 이벤트를 쏜다.
-    - 노드 사이마다 pause/stop 플래그를 확인한다.
-    - 종료 / 에러 / 사용자 중단을 모두 별도 이벤트로 알린다.
-
-이벤트 *생성* 자체는 ``server.internal.event_builders`` 의 순수 함수에 위임하고,
-이 모듈은 흐름 제어 + ``publish`` 부수효과만 다룬다. 세부 설계는
-``.plan/01-backend-fastapi.md`` "AgentRunner 설계" 섹션 참조.
+PR3 부터 ``Session.publish`` 가 자체적으로 seq 증가 + DB 영속화를 처리하므로
+runner 는 발행 호출만 하면 된다. ``_publish_started/finished/errored/stopped``
+시점에 ``sessions`` 테이블의 status / iterations / result / error 도 함께 갱신해
+sidecar 재시작 후 `GET /sessions` 응답이 일관되게 보이도록 한다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from pathlib import Path
+from typing import Optional
 
 from langchain_core.runnables import RunnableConfig
 
@@ -36,6 +35,11 @@ from server.internal.events import (
     SessionStopped,
 )
 from server.internal.session import Session, SessionStatus
+from server.internal.storage import open_connection
+from server.internal.storage.repositories import (
+    ScreenshotRepository,
+    SessionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +52,26 @@ class AgentRunner:
     Attributes:
         session: 이벤트 / 제어 플래그를 공유하는 ``Session``.
         manager: ``BrowserManager`` 인스턴스. 외부에서 라이프사이클을 결정한다.
+        db_path: 스크린샷 메타 / 세션 status 갱신에 쓸 SQLite 파일 경로.
     """
 
-    def __init__(self, session: Session, manager: BrowserManager) -> None:
+    def __init__(
+        self,
+        session: Session,
+        manager: BrowserManager,
+        db_path: Path,
+    ) -> None:
         """러너를 초기화한다.
 
         Args:
             session: 이벤트와 pause/stop 플래그를 공유할 세션.
             manager: 이미 생성됐지만 ``start()`` 는 아직 호출되지 않은 매니저.
                 runner 가 ``start()`` / ``stop()`` 라이프사이클을 책임진다.
+            db_path: ``ServerSettings.db_path`` 그대로 — DB 영속화 호출에 사용.
         """
         self.session = session
         self.manager = manager
+        self._db_path = db_path
         self._prev_active_subtask: int = -1
 
     # ── 진입점 ────────────────────────────────────────────────
@@ -139,6 +151,8 @@ class AgentRunner:
     async def _dispatch_node_event(self, node_name: str, state: AgentState) -> None:
         """노드 이름에 따라 0~2개의 이벤트를 발행한다.
 
+        observe 노드에서는 스크린샷 메타도 함께 DB 에 영속화한다.
+
         Args:
             node_name: 직전에 실행된 노드 이름.
             state: 해당 노드가 반환한 ``AgentState``.
@@ -155,10 +169,11 @@ class AgentRunner:
             self._prev_active_subtask = -1
         elif node_name == "observe":
             await self.session.publish(build_step_observed(sid, state))
-            # observe 마다 새 스크린샷이 만들어진다. 아티팩트 응답에서 갤러리로 노출.
             screenshot = state.get("screenshot_path")
             if screenshot:
                 self.session.screenshot_paths.append(screenshot)
+                step_index = int(state.get("iterations", 0))
+                await self._persist_screenshot(screenshot, step_index)
         elif node_name == "think":
             event = build_step_thinking(sid, state)
             if event is not None:
@@ -197,6 +212,9 @@ class AgentRunner:
         await self.session.publish(
             SessionStarted(session_id=self.session.id, task=self.session.task)
         )
+        await self._update_db_status(
+            SessionStatus.RUNNING, iterations=0, result=None, error=None, finished=False
+        )
 
     async def _publish_finished(self, state: AgentState) -> None:
         """그래프가 정상 종료된 후 결과 이벤트를 발행한다.
@@ -222,6 +240,9 @@ class AgentRunner:
             await self.session.publish(
                 SessionErrored(session_id=self.session.id, error=error)
             )
+            await self._update_db_status(
+                SessionStatus.ERRORED, iterations, None, error, finished=True
+            )
             return
 
         self.session.status = SessionStatus.FINISHED
@@ -231,6 +252,9 @@ class AgentRunner:
                 result=result_text,
                 iterations=iterations,
             )
+        )
+        await self._update_db_status(
+            SessionStatus.FINISHED, iterations, result_text, None, finished=True
         )
 
     async def _publish_errored(self, message: str) -> None:
@@ -244,8 +268,96 @@ class AgentRunner:
         await self.session.publish(
             SessionErrored(session_id=self.session.id, error=message)
         )
+        await self._update_db_status(
+            SessionStatus.ERRORED,
+            iterations=self.session.latest_iterations,
+            result=None,
+            error=message,
+            finished=True,
+        )
 
     async def _publish_stopped(self) -> None:
         """사용자 stop 요청에 의한 종료 이벤트를 발행한다."""
         self.session.status = SessionStatus.STOPPED
         await self.session.publish(SessionStopped(session_id=self.session.id))
+        await self._update_db_status(
+            SessionStatus.STOPPED,
+            iterations=self.session.latest_iterations,
+            result=None,
+            error=None,
+            finished=True,
+        )
+
+    # ── DB 영속화 헬퍼 ────────────────────────────────────────
+
+    async def _persist_screenshot(self, path: str, step_index: int) -> None:
+        """스크린샷 메타 1건을 ``screenshots`` 테이블에 append 한다.
+
+        DB write 가 실패해도 runner 흐름은 막지 않는다 — 로그만 남긴다.
+
+        Args:
+            path: 스크린샷 파일 경로.
+            step_index: ``iterations`` 시점.
+        """
+        try:
+            await asyncio.to_thread(self._sync_persist_screenshot, path, step_index)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "스크린샷 메타 영속화 실패: session_id=%s path=%s",
+                self.session.id,
+                path,
+            )
+
+    def _sync_persist_screenshot(self, path: str, step_index: int) -> None:
+        """``ScreenshotRepository.append`` 를 짧은 connection 으로 호출한다."""
+        conn = open_connection(self._db_path)
+        try:
+            ScreenshotRepository(conn).append(self.session.id, path, step_index)
+        finally:
+            conn.close()
+
+    async def _update_db_status(
+        self,
+        status: SessionStatus,
+        iterations: int,
+        result: Optional[str],
+        error: Optional[str],
+        finished: bool,
+    ) -> None:
+        """``sessions`` row 의 status/iterations/result/error 를 업데이트한다.
+
+        DB write 가 실패해도 runner 흐름은 막지 않는다 — 로그만 남긴다. 다음 부팅에
+        startup hook 의 stale-RUNNING 정리가 cover 한다.
+        """
+        try:
+            await asyncio.to_thread(
+                self._sync_update_status, status, iterations, result, error, finished
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "세션 상태 영속화 실패: session_id=%s status=%s",
+                self.session.id,
+                status.value,
+            )
+
+    def _sync_update_status(
+        self,
+        status: SessionStatus,
+        iterations: int,
+        result: Optional[str],
+        error: Optional[str],
+        finished: bool,
+    ) -> None:
+        """``SessionRepository.update_status`` 를 짧은 connection 으로 호출한다."""
+        conn = open_connection(self._db_path)
+        try:
+            SessionRepository(conn).update_status(
+                self.session.id,
+                status,
+                iterations,
+                result,
+                error,
+                finished=finished,
+            )
+        finally:
+            conn.close()
