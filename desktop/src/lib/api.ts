@@ -4,6 +4,7 @@
  * URL 베이스는 ``window.okdoit.sidecarUrl`` (preload 가 주입).
  */
 
+import type { SessionStatus } from "@/stores/sessionStore";
 import type { SessionArtifact } from "@/types/artifact";
 
 export interface RunRequestBody {
@@ -13,6 +14,23 @@ export interface RunRequestBody {
 
 export interface RunResponse {
   session_id: string;
+}
+
+/**
+ * sidecar ``GET /sessions`` 응답의 단일 항목.
+ *
+ * 원본은 ``server/internal/session_models.py`` 의 ``SessionSnapshot``.
+ * 수동 동기화로 유지한다.
+ */
+export interface SessionSnapshot {
+  id: string;
+  task: string;
+  status: SessionStatus;
+  iterations: number;
+  result: string | null;
+  error: string | null;
+  /** ISO 8601. PR3 이전 row 는 null 일 수 있음. */
+  created_at: string | null;
 }
 
 /**
@@ -63,6 +81,26 @@ export const postResume = (sessionId: string): Promise<void> =>
 
 export const postStop = (sessionId: string): Promise<void> =>
   postSessionAction(sessionId, "stop");
+
+// ── 세션 목록 ─────────────────────────────────────────────────
+
+/**
+ * sidecar 의 모든 세션(활성+비활성) 스냅샷을 최신순으로 조회한다.
+ *
+ * sidecar 재시작 후 사이드바 복원, 사용자가 과거 세션을 다시 열어보는 경로의
+ * 단일 진입점.
+ *
+ * @throws Error sidecar 가 4xx / 5xx 응답을 주거나 네트워크 실패 시.
+ */
+export async function getSessions(): Promise<SessionSnapshot[]> {
+  const url = `${window.okdoit.sidecarUrl}/sessions`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`GET /sessions 실패: ${res.status} ${detail}`);
+  }
+  return (await res.json()) as SessionSnapshot[];
+}
 
 // ── 아티팩트 ──────────────────────────────────────────────────
 

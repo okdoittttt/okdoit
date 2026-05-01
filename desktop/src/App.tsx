@@ -20,6 +20,7 @@ import { CenterPane } from "@/components/center/CenterPane";
 import { ResultPane } from "@/components/result/ResultPane";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { getSessions } from "@/lib/api";
 import {
   useActiveSession,
   useSessionList,
@@ -32,6 +33,7 @@ type ReadyState = "loading" | "first-run" | "ready";
 
 const ACCENT = TOKENS.accent;
 
+
 export default function App() {
   const [readyState, setReadyState] = useState<ReadyState>("loading");
   const [showSettings, setShowSettings] = useState(false);
@@ -41,6 +43,7 @@ export default function App() {
   const activeSession = useActiveSession();
   const sessionList = useSessionList();
   const setActive = useSessions((s) => s.setActive);
+  const mergeHistorical = useSessions((s) => s.mergeHistorical);
 
   useEffect(() => {
     void window.okdoit.settings.status().then(({ ready }) => {
@@ -51,6 +54,33 @@ export default function App() {
   useEffect(() => {
     return () => wsManager.disconnectAll();
   }, []);
+
+  // 부팅 후 ready 가 되면 sidecar 의 세션 목록을 한 번 가져와 사이드바에 머지.
+  // 라이브 진행 중인 세션은 ``mergeHistorical`` 이 자동으로 건드리지 않는다.
+  useEffect(() => {
+    if (readyState !== "ready") return;
+    let cancelled = false;
+    getSessions()
+      .then((snaps) => {
+        if (!cancelled) mergeHistorical(snaps);
+      })
+      .catch((err: unknown) => {
+        console.warn("[app] GET /sessions 실패:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [readyState, mergeHistorical]);
+
+  // 활성/비활성 무관 — 사용자가 선택한 세션의 step 카드가 비어있으면 WS 에 연결해
+  // ``?since_seq=0`` 으로 누락분(과거 세션은 전체) replay 받는다. wsManager.connect
+  // 는 idempotent 라 TaskInputBox 가 이미 연 연결을 중복 열지 않는다. 비활성 세션은
+  // sidecar 가 replay 후 close 하고, 활성 세션은 그대로 라이브 큐로 진입한다.
+  useEffect(() => {
+    if (!activeSession) return;
+    if (activeSession.steps.length > 0) return;
+    wsManager.connect(activeSession.id);
+  }, [activeSession?.id, activeSession?.steps.length]);
 
   const sidebarItems = useMemo<SessionItemData[]>(
     () => sessionList.map(toSidebarItem),

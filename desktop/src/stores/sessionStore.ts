@@ -16,6 +16,7 @@
 
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import type { SessionSnapshot } from "@/lib/api";
 import type {
   PlanCreated,
   PlanReplanned,
@@ -95,6 +96,17 @@ export interface SessionsState {
   applyEvent: (event: ServerEvent) => void;
   clearReplanFlash: (sessionId: string) => void;
   removeSession: (sessionId: string) => void;
+  /**
+   * sidecar ``GET /sessions`` 결과를 store 에 머지한다.
+   *
+   * 이미 메모리에 있는 세션(``sessions[id]`` 존재)은 건드리지 않는다 — 라이브
+   * 진행 중인 데이터를 DB 스냅샷으로 덮어쓰면 step 카드가 사라진다. 신규
+   * 항목만 ``status`` / ``task`` / ``startedAt`` (created_at 파싱) 으로 seed.
+   *
+   * step 은 비어있어 사용자가 클릭해 선택하면 wsManager.connect 가
+   * ``?since_seq=0`` 으로 replay 해 채워준다.
+   */
+  mergeHistorical: (snapshots: SessionSnapshot[]) => void;
   reset: () => void;
 }
 
@@ -265,6 +277,33 @@ function newSessionData(sessionId: string, task: string): SessionData {
   };
 }
 
+/**
+ * DB 스냅샷에서 SessionData 를 만든다.
+ *
+ * step / subtask 등 라이브 데이터는 비어있고, 사용자가 클릭해 선택하면 WS replay
+ * 가 채운다. ``startedAt`` 은 ``created_at`` ISO 를 파싱한 ms — 사이드바의 상대
+ * 시각/elapsed 표시에 사용. created_at 이 없거나 파싱 실패 시 fallback 으로
+ * 현재 시각.
+ */
+function snapshotToSessionData(snap: SessionSnapshot): SessionData {
+  const parsed =
+    snap.created_at !== null ? Date.parse(snap.created_at) : Number.NaN;
+  const startedAt = Number.isFinite(parsed) ? parsed : Date.now();
+  return {
+    id: snap.id,
+    task: snap.task,
+    status: snap.status,
+    subtasks: [],
+    activeSubtaskIndex: -1,
+    steps: [],
+    replanFlash: false,
+    result: snap.result,
+    error: snap.error,
+    iterations: snap.iterations,
+    startedAt,
+  };
+}
+
 // ── 스토어 ────────────────────────────────────────────────────
 
 export const useSessions = create<SessionsState>((set) => ({
@@ -314,6 +353,17 @@ export const useSessions = create<SessionsState>((set) => ({
       const nextActive =
         s.activeSessionId === sessionId ? null : s.activeSessionId;
       return { sessions: rest, activeSessionId: nextActive };
+    }),
+
+  mergeHistorical: (snapshots) =>
+    set((s) => {
+      const merged = { ...s.sessions };
+      for (const snap of snapshots) {
+        // 이미 메모리에 있는 세션은 라이브 데이터를 보존하기 위해 그대로 둔다.
+        if (snap.id in merged) continue;
+        merged[snap.id] = snapshotToSessionData(snap);
+      }
+      return { sessions: merged };
     }),
 
   reset: () => set({ sessions: {}, activeSessionId: null }),

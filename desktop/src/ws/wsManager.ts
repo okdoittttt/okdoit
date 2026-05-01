@@ -43,17 +43,17 @@ class WsManager {
   /**
    * 세션 이벤트 스트림에 연결한다. 이미 연결돼 있으면 no-op.
    *
-   * 같은 세션에 대한 lastSeq 가 메모리 또는 localStorage 에 있으면
-   * ``?since_seq=<n>`` 쿼리로 누락분 replay 를 요청한다. 처음 연결이면 쿼리 없이.
+   * 항상 ``?since_seq=<n>`` 쿼리를 부착한다 — 저장된 lastSeq 가 있으면 그 값,
+   * 없으면 ``0`` (처음부터). 이렇게 하면:
+   *   - 새 세션: replay 0 events, 라이브 모드로 진입.
+   *   - 끊김 후 재연결: 누락분 replay + 라이브 (sidecar 가 dedup).
+   *   - 비활성(과거) 세션 클릭: 모든 events replay 후 정상 close (PR5).
    */
   connect(sessionId: string): void {
     if (this.connections.has(sessionId)) return;
 
-    const lastSeq = this.lastSeqs.get(sessionId) ?? loadLastSeq(sessionId);
-    let url = `${window.okdoit.wsUrl}/sessions/${sessionId}/events`;
-    if (lastSeq !== null) {
-      url += `?since_seq=${lastSeq}`;
-    }
+    const lastSeq = this.lastSeqs.get(sessionId) ?? loadLastSeq(sessionId) ?? 0;
+    const url = `${window.okdoit.wsUrl}/sessions/${sessionId}/events?since_seq=${lastSeq}`;
 
     const ws = new WebSocket(url);
 
