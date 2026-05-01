@@ -77,7 +77,13 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+
+# okdoit local-first data (sidecar 가 쓰는 데이터 디렉토리)
 .screenshots
+.okdoit-dev/
+okdoit.db
+okdoit.db-*
+screenshots/
 
 # Jupyter Notebook
 .ipynb_checkpoints
