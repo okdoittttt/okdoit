@@ -3,11 +3,15 @@
 ``core.graph.create_graph`` 와 ``core.browser.BrowserManager`` 를 모킹해서
 실제 LLM/Playwright 호출 없이 이벤트 시퀀스를 검증한다. 빌더 함수의 단위 테스트는
 ``test_event_builders.py`` 참조.
+
+PR3 부터 ``AgentRunner`` 가 DB 영속화도 책임지므로 ``db_path`` 가 필수 인자이고
+``init_db`` 로 스키마가 미리 적용된 상태여야 한다.
 """
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,6 +31,15 @@ from server.internal.events import (
 )
 from server.internal.runner import AgentRunner
 from server.internal.session import Session, SessionStatus
+from server.internal.storage import init_db, schema_sql_path
+
+
+@pytest.fixture
+def db_path(tmp_path: Path) -> Path:
+    """runner 가 DB 영속화에 쓸 SQLite 파일 — 스키마까지 부트스트랩."""
+    db = tmp_path / "okdoit.db"
+    init_db(db, schema_sql_path())
+    return db
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────────
@@ -84,13 +97,17 @@ def _fake_manager() -> MagicMock:
 
 
 async def _drain_events(session: Session) -> list[Any]:
-    """세션 큐에서 종료 sentinel 까지 모두 꺼낸다."""
+    """세션 큐에서 종료 sentinel 까지 모두 꺼내 도메인 이벤트만 반환한다.
+
+    PR3 부터 큐는 ``WireMessage`` envelope 을 들고 있으므로 ``wire.event`` 본체를
+    꺼내 기존 테스트 로직(이벤트 type 검사)을 그대로 쓰게 한다.
+    """
     collected: list[Any] = []
     while True:
-        evt = await session.next_event()
-        if evt is None:
+        wire = await session.next_event()
+        if wire is None:
             break
-        collected.append(evt)
+        collected.append(wire.event)
     return collected
 
 
@@ -98,7 +115,7 @@ async def _drain_events(session: Session) -> list[Any]:
 
 
 @pytest.mark.asyncio
-async def test_runner_emits_full_event_sequence_for_simple_run() -> None:
+async def test_runner_emits_full_event_sequence_for_simple_run(db_path: Path) -> None:
     """plan→observe→think→act→verify(is_done) 한 사이클의 이벤트를 검증한다."""
     plan_state = _make_state(
         subtasks=[{"description": "검색", "done": False}, {"description": "확인", "done": False}],
@@ -145,7 +162,7 @@ async def test_runner_emits_full_event_sequence_for_simple_run() -> None:
     ]
 
     session = Session(task="검색해줘")
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
 
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
@@ -168,7 +185,7 @@ async def test_runner_emits_full_event_sequence_for_simple_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_emits_subtask_activated_only_on_change() -> None:
+async def test_runner_emits_subtask_activated_only_on_change(db_path: Path) -> None:
     """active subtask 가 바뀐 verify 직후에만 ``subtask.activated`` 가 발행된다."""
     subtasks_v1 = [
         {"description": "a", "done": True},
@@ -187,7 +204,7 @@ async def test_runner_emits_subtask_activated_only_on_change() -> None:
     ]
 
     session = Session(task="t")
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
 
@@ -199,7 +216,7 @@ async def test_runner_emits_subtask_activated_only_on_change() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_emits_plan_replanned_event() -> None:
+async def test_runner_emits_plan_replanned_event(db_path: Path) -> None:
     """replan 노드 결과는 ``plan.replanned`` 로 변환된다."""
     new_subtasks = [{"description": "다시", "done": False}]
     steps = [
@@ -208,7 +225,7 @@ async def test_runner_emits_plan_replanned_event() -> None:
         {"verify": _make_state(iterations=1, is_done=True, result="ok", subtasks=[{"description": "다시", "done": True}])},
     ]
     session = Session(task="t")
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
 
@@ -221,7 +238,9 @@ async def test_runner_emits_plan_replanned_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_stops_when_request_stop_set_before_first_step() -> None:
+async def test_runner_stops_when_request_stop_set_before_first_step(
+    db_path: Path,
+) -> None:
     """루프 진입 직전에 stop 이 들어와 있으면 첫 스텝 후 즉시 빠진다."""
     steps = [
         {"plan": _make_state(subtasks=[])},
@@ -232,7 +251,7 @@ async def test_runner_stops_when_request_stop_set_before_first_step() -> None:
     session = Session(task="t")
     session.request_stop()
 
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
 
@@ -242,13 +261,15 @@ async def test_runner_stops_when_request_stop_set_before_first_step() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_publishes_error_event_when_browser_start_fails() -> None:
+async def test_runner_publishes_error_event_when_browser_start_fails(
+    db_path: Path,
+) -> None:
     """브라우저 시작 실패 시 ``session.errored`` 가 발행되고 status 가 ERRORED."""
     session = Session(task="t")
     bad_manager = _fake_manager()
     bad_manager.start = AsyncMock(side_effect=RuntimeError("playwright down"))
 
-    runner = AgentRunner(session=session, manager=bad_manager)
+    runner = AgentRunner(session=session, manager=bad_manager, db_path=db_path)
     await runner.run()
 
     events = await _drain_events(session)
@@ -259,7 +280,7 @@ async def test_runner_publishes_error_event_when_browser_start_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_accumulates_screenshot_paths_on_observe() -> None:
+async def test_runner_accumulates_screenshot_paths_on_observe(db_path: Path) -> None:
     """observe 노드 결과의 screenshot_path 가 ``session.screenshot_paths`` 에 누적된다."""
     steps = [
         {"plan": _make_state(subtasks=[{"description": "a", "done": False}])},
@@ -269,7 +290,7 @@ async def test_runner_accumulates_screenshot_paths_on_observe() -> None:
         {"verify": _make_state(iterations=3, is_done=True, result="ok", subtasks=[{"description": "a", "done": True}])},
     ]
     session = Session(task="t")
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
 
@@ -277,7 +298,9 @@ async def test_runner_accumulates_screenshot_paths_on_observe() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_preserves_subtasks_and_collected_data_on_finish() -> None:
+async def test_runner_preserves_subtasks_and_collected_data_on_finish(
+    db_path: Path,
+) -> None:
     """정상 종료 시 ``latest_subtasks`` / ``latest_collected_data`` 가 보존된다."""
     final_subtasks = [{"description": "a", "done": True}]
     collected = {"서울": {"information": "맑음", "collected": True}}
@@ -294,7 +317,7 @@ async def test_runner_preserves_subtasks_and_collected_data_on_finish() -> None:
         },
     ]
     session = Session(task="t")
-    runner = AgentRunner(session=session, manager=_fake_manager())
+    runner = AgentRunner(session=session, manager=_fake_manager(), db_path=db_path)
     with patch("server.internal.runner.create_graph", return_value=_fake_graph(steps)):
         await runner.run()
 

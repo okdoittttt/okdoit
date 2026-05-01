@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, Iterator
 from unittest.mock import patch
 
@@ -17,18 +18,30 @@ from fastapi.testclient import TestClient
 from server.internal.app import create_app
 from server.internal.deps import get_session_store
 from server.internal.events import SessionFinished, SessionStarted
-from server.internal.session import SessionStatus, SessionStore
+from server.internal.session import SessionStatus, SqliteSessionStore
+from server.internal.storage import init_db, schema_sql_path
 
 
 @pytest.fixture
-def store() -> SessionStore:
-    """테스트용 격리된 SessionStore."""
-    return SessionStore()
+def store(isolated_data_dir: Path) -> SqliteSessionStore:
+    """테스트용 격리된 ``SqliteSessionStore``.
+
+    ``isolated_data_dir`` fixture(conftest) 가 ``OKDOIT_DATA_DIR=tmp_path`` 를
+    설정하고 ``get_settings`` / ``get_session_store`` 캐시를 비워준다. 그 위에
+    schema 초기화 + store 인스턴스를 얹는다.
+    """
+    db = isolated_data_dir / "okdoit.db"
+    init_db(db, schema_sql_path())
+    return SqliteSessionStore(db_path=db)
 
 
 @pytest.fixture
-def client(store: SessionStore) -> Iterator[TestClient]:
-    """``get_session_store`` 의존성을 격리 store 로 override 한 TestClient."""
+def client(store: SqliteSessionStore) -> Iterator[TestClient]:
+    """``get_session_store`` 의존성을 격리 store 로 override 한 TestClient.
+
+    ``create_app`` 의 ``_lifespan`` 도 ``OKDOIT_DATA_DIR`` 가 같은 tmp_path 라
+    같은 DB 파일을 부트스트랩한다 — override 후엔 라우터가 ``store`` 만 본다.
+    """
     app = create_app()
     app.dependency_overrides[get_session_store] = lambda: store
     with TestClient(app) as c:
@@ -180,8 +193,11 @@ def test_websocket_streams_events_until_close(
     with client.websocket_connect(f"/sessions/{session.id}/events") as ws:
         first = ws.receive_json()
         second = ws.receive_json()
-        assert first["type"] == "session.started"
-        assert second["type"] == "session.finished"
+        # PR3 부터 WS 페이로드는 WireMessage envelope (`{seq, event}`).
+        assert first["seq"] == 1
+        assert first["event"]["type"] == "session.started"
+        assert second["seq"] == 2
+        assert second["event"]["type"] == "session.finished"
 
 
 def test_websocket_unknown_session_closes(client: TestClient) -> None:
