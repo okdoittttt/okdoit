@@ -234,18 +234,18 @@ def test_artifact_returns_404_for_unknown_session(client: TestClient) -> None:
 def test_artifact_preserves_subdir_in_screenshot_url(
     client: TestClient, store: SessionStore, tmp_path: Any
 ) -> None:
-    """``.screenshots/<sid>/`` sub-dir 경로가 정적 URL 에 그대로 보존되어야 한다.
+    """``<data_dir>/screenshots/<sid>/`` sub-dir 경로가 정적 URL 에 그대로 보존되어야 한다.
 
     v0.3 회귀 케이스: 두 세션이 같은 ``step_N.png`` 를 생성하면 basename 만 쓰던
     이전 변환은 두 세션 갤러리에 같은 URL 이 들어가서 화면이 섞였다.
     sub-dir 정보가 URL 에 포함되어야 세션 간 격리됨.
     """
-    from pathlib import Path
+    from server.internal.config import get_settings
 
     s = store.create(task="t")
     s.status = SessionStatus.FINISHED
-    # ``.screenshots`` 루트 하위에 실제 sub-dir 파일이 있는 것처럼 흉내낸다.
-    screenshots_root = Path(".screenshots").resolve()
+    # 런타임이 실제로 쓰는 ``settings.screenshot_dir`` 하위에 파일이 있는 것처럼 흉내낸다.
+    screenshots_root = get_settings().screenshot_dir.resolve()
     sub = screenshots_root / s.id
     s.screenshot_paths = [str(sub / "step_1.png"), str(sub / "step_2.png")]
 
