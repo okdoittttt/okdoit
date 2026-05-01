@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +25,10 @@ class ServerSettings(BaseSettings):
         log_level: uvicorn / 애플리케이션 로그 레벨.
         headless_default: ``POST /run`` 의 ``headless`` 미지정 시 사용할 기본값.
         protocol_version: 클라이언트와 호환성 협상용 문자열. 메이저 변경 시 올린다.
+        data_dir: sidecar 가 쓰는 모든 파일(스크린샷, SQLite DB 등)의 기준 디렉토리.
+            Electron main 이 ``OKDOIT_DATA_DIR`` 환경변수로 절대 경로를 주입한다.
+            sidecar 단독 실행(dev / 테스트)에서는 cwd 로 fallback —
+            매 인스턴스마다 ``Path.cwd()`` 를 새로 평가하기 위해 ``default_factory`` 사용.
     """
 
     model_config = SettingsConfigDict(
@@ -38,6 +44,17 @@ class ServerSettings(BaseSettings):
     log_level: str = "info"
     headless_default: bool = False
     protocol_version: str = "0.1"
+    data_dir: Path = Field(default_factory=Path.cwd)
+
+    @property
+    def screenshot_dir(self) -> Path:
+        """스크린샷 루트. ``<data_dir>/screenshots``."""
+        return self.data_dir / "screenshots"
+
+    @property
+    def db_path(self) -> Path:
+        """SQLite 파일 경로. ``<data_dir>/okdoit.db``. 단계 02 부터 사용."""
+        return self.data_dir / "okdoit.db"
 
 
 @lru_cache(maxsize=1)

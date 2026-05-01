@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from server.internal.config import ServerSettings, get_settings
 from server.internal.deps import get_session, get_session_store
 from server.internal.events import SessionPaused, SessionResumed
 from server.internal.schemas import OkResponse, SessionArtifact
@@ -13,10 +14,6 @@ from server.internal.session import Session, SessionSnapshot, SessionStatus, Ses
 
 # 정적 라우트 prefix. ``app.py`` 의 ``StaticFiles`` 마운트 경로와 동기화해야 한다.
 SCREENSHOT_URL_PREFIX: str = "/static/screenshots"
-
-# 스크린샷 파일이 저장되는 루트 디렉토리. ``StaticFiles`` 가 마운트하는 디렉토리와
-# 동일하며, URL 변환의 기준점으로 쓴다. ``app.py`` / ``routes/run.py`` 와 동기화.
-_SCREENSHOT_ROOT: Path = Path(".screenshots").resolve()
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -87,6 +84,7 @@ async def stop_session(
 @router.get("/{session_id}/artifact", response_model=SessionArtifact)
 async def get_session_artifact(
     session: Session = Depends(get_session),
+    settings: ServerSettings = Depends(get_settings),
 ) -> SessionArtifact:
     """세션 종료 후 결과물 한 묶음을 반환한다.
 
@@ -95,6 +93,7 @@ async def get_session_artifact(
 
     Args:
         session: 의존성 주입된 ``Session``.
+        settings: 스크린샷 루트 결정에 쓰는 sidecar 설정.
 
     Returns:
         ``SessionArtifact`` — 결과 텍스트 + subtasks + 스크린샷 URL 목록 + 추출 데이터.
@@ -107,21 +106,25 @@ async def get_session_artifact(
         result=session.latest_result,
         error=session.latest_error,
         subtasks=list(session.latest_subtasks),
-        screenshots=[_to_screenshot_url(p) for p in session.screenshot_paths],
+        screenshots=[
+            _to_screenshot_url(p, settings.screenshot_dir)
+            for p in session.screenshot_paths
+        ],
         collected_data=dict(session.latest_collected_data),
     )
 
 
-def _to_screenshot_url(path: str) -> str:
+def _to_screenshot_url(path: str, screenshot_root: Path) -> str:
     """스크린샷 절대 경로를 정적 라우트 URL 로 변환한다.
 
-    가능한 경우 ``.screenshots/`` 루트 기준 상대 경로를 그대로 URL 에 옮겨
-    sub-dir 정보를 보존한다(예: ``.screenshots/<sid>/step_1.png`` →
+    가능한 경우 ``screenshot_root`` 기준 상대 경로를 그대로 URL 에 옮겨
+    sub-dir 정보를 보존한다(예: ``<root>/<sid>/step_1.png`` →
     ``/static/screenshots/<sid>/step_1.png``). 루트 밖의 경로면 basename 만 사용해
     fallback 한다.
 
     Args:
         path: 스크린샷 파일의 sidecar 로컬 경로.
+        screenshot_root: ``settings.screenshot_dir`` 의 절대 경로 기준점.
 
     Returns:
         ``/static/screenshots/...`` 형태의 상대 URL. 클라이언트가 sidecar 베이스
@@ -129,8 +132,8 @@ def _to_screenshot_url(path: str) -> str:
     """
     abs_path = Path(path).resolve()
     try:
-        rel = abs_path.relative_to(_SCREENSHOT_ROOT)
+        rel = abs_path.relative_to(screenshot_root.resolve())
     except ValueError:
-        # ``.screenshots/`` 루트 밖이면 sub-dir 정보를 알 수 없으니 basename 만 사용.
+        # 루트 밖이면 sub-dir 정보를 알 수 없으니 basename 만 사용.
         rel = Path(abs_path.name)
     return f"{SCREENSHOT_URL_PREFIX}/{rel.as_posix()}"

@@ -17,25 +17,27 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from server.internal.config import get_settings
+from server.internal.config import ServerSettings, get_settings
 from server.internal.deps import get_session_store
 from server.internal.routes import register_routes
 
 logger = logging.getLogger(__name__)
 
-# 스크린샷 디렉토리 (``core.browser.BrowserManager.screenshot_dir`` 의 기본값과 동일).
-# 절대 경로로 resolve 한 결과를 ``StaticFiles`` 에 전달한다.
-SCREENSHOT_DIR_NAME: str = ".screenshots"
+# 스크린샷 정적 라우트 마운트 경로. ``routes/sessions.py`` 의
+# ``SCREENSHOT_URL_PREFIX`` 와 동기화한다.
 SCREENSHOT_MOUNT_PATH: str = "/static/screenshots"
 
 
-def _ensure_screenshot_dir() -> Path:
-    """스크린샷 디렉토리가 없으면 만들고 절대 경로를 반환한다.
+def _ensure_screenshot_dir(settings: ServerSettings) -> Path:
+    """스크린샷 디렉토리(``<data_dir>/screenshots``)가 없으면 만들고 절대 경로를 반환한다.
+
+    Args:
+        settings: ``data_dir`` 를 결정해 주는 sidecar 설정.
 
     Returns:
-        ``.screenshots`` 의 절대 경로(``Path``).
+        ``<data_dir>/screenshots`` 의 절대 경로(``Path``).
     """
-    screenshots = Path(SCREENSHOT_DIR_NAME).resolve()
+    screenshots = settings.screenshot_dir.resolve()
     screenshots.mkdir(parents=True, exist_ok=True)
     return screenshots
 
@@ -87,7 +89,7 @@ def create_app() -> FastAPI:
     # 스크린샷 정적 라우트 — 클라이언트가 ``<img src>`` 로 sidecar 가 보유한 PNG 를
     # 직접 띄울 수 있게 한다. 경로 매핑은 ``routes/sessions.py`` 의
     # ``SCREENSHOT_URL_PREFIX`` 와 동기화한다.
-    screenshots_dir = _ensure_screenshot_dir()
+    screenshots_dir = _ensure_screenshot_dir(settings)
     app.mount(
         SCREENSHOT_MOUNT_PATH,
         StaticFiles(directory=str(screenshots_dir)),
