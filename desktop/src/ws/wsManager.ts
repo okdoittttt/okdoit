@@ -15,13 +15,17 @@
  */
 
 import { useSessions } from "@/stores/sessionStore";
-import type { ServerEvent } from "@/types/events";
+import type { WireMessage } from "@/types/events";
 
 class WsManager {
   private connections = new Map<string, WebSocket>();
 
   /**
    * 세션 이벤트 스트림에 연결한다. 이미 연결돼 있으면 no-op.
+   *
+   * sidecar 는 ``WireMessage`` envelope (`{seq, event}`) 를 보낸다 — PR3 부터.
+   * ``seq`` 는 PR4 에서 재연결 시 ``?since_seq=<n>`` 으로 누락분 replay 에 쓴다.
+   * 현재(PR3)는 envelope 만 풀고 ``event`` 본체를 store 에 흘려보낸다.
    */
   connect(sessionId: string): void {
     if (this.connections.has(sessionId)) return;
@@ -31,8 +35,8 @@ class WsManager {
 
     ws.onmessage = (e: MessageEvent<string>) => {
       try {
-        const event = JSON.parse(e.data) as ServerEvent;
-        useSessions.getState().applyEvent(event);
+        const wire = JSON.parse(e.data) as WireMessage;
+        useSessions.getState().applyEvent(wire.event);
       } catch (err) {
         console.error("[ws] 메시지 파싱 실패:", err, e.data);
       }

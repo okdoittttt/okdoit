@@ -124,3 +124,14 @@ export type ServerEvent =
   | StepVerified;
 
 export type ServerEventType = ServerEvent["type"];
+
+/**
+ * WebSocket transport envelope — ``seq`` + ``event``.
+ *
+ * sidecar 의 ``server.internal.events.WireMessage`` 와 1:1 미러. 재연결 시
+ * 마지막 수신 ``seq`` 를 ``?since_seq=<n>`` 쿼리로 보내 누락분을 복원한다(PR4).
+ */
+export interface WireMessage {
+  seq: number;
+  event: ServerEvent;
+}
