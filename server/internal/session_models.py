@@ -37,6 +37,9 @@ class SessionSnapshot(BaseModel):
         iterations: 가장 최근에 본 ``AgentState["iterations"]`` 값.
         result: 정상 종료 시 결과 텍스트. 미종료 / 실패 시 None.
         error: 에러 종료 시 메시지. 정상 / 미종료 시 None.
+        created_at: 세션 row 생성 시각 (ISO 8601). 활성 세션에는 None 일 수 있음
+            (인메모리 ``Session.snapshot()`` 경로 — DB row 의 created_at 을 별도
+            조회하지 않는다). 사이드바 상대 시각 표시용 (PR5).
     """
 
     id: str
@@ -45,3 +48,4 @@ class SessionSnapshot(BaseModel):
     iterations: int = 0
     result: Optional[str] = None
     error: Optional[str] = None
+    created_at: Optional[str] = None

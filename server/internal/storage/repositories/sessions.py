@@ -149,7 +149,10 @@ class SessionRepository:
             row 가 있으면 ``SessionSnapshot``, 없으면 None.
         """
         row = self._conn.execute(
-            "SELECT id, task, status, iterations, result, error FROM sessions WHERE id=?",
+            """
+            SELECT id, task, status, iterations, result, error, created_at
+            FROM sessions WHERE id=?
+            """,
             (session_id,),
         ).fetchone()
         if row is None:
@@ -161,6 +164,7 @@ class SessionRepository:
             iterations=row["iterations"],
             result=row["result"],
             error=row["error"],
+            created_at=row["created_at"],
         )
 
     def list_all(self, limit: int = _DEFAULT_LIST_LIMIT) -> list[SessionSnapshot]:
@@ -174,7 +178,7 @@ class SessionRepository:
         """
         rows = self._conn.execute(
             """
-            SELECT id, task, status, iterations, result, error
+            SELECT id, task, status, iterations, result, error, created_at
             FROM sessions
             ORDER BY created_at DESC
             LIMIT ?
@@ -189,6 +193,7 @@ class SessionRepository:
                 iterations=r["iterations"],
                 result=r["result"],
                 error=r["error"],
+                created_at=r["created_at"],
             )
             for r in rows
         ]
