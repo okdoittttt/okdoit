@@ -8,10 +8,14 @@
 
 from __future__ import annotations
 
+import sqlite3
+from typing import Iterator
+
 from fastapi import Depends, HTTPException, status
 
 from server.internal.config import ServerSettings, get_settings
 from server.internal.session import Session, SessionStore
+from server.internal.storage import open_connection
 
 # 프로세스 단위 단일 SessionStore. 라우터는 ``Depends(get_session_store)`` 로
 # 받아가고, 테스트는 ``app.dependency_overrides`` 로 격리 store 를 주입한다.
@@ -55,8 +59,28 @@ def get_session(
     return session
 
 
+def get_db() -> Iterator[sqlite3.Connection]:
+    """요청 단위로 새 SQLite connection 을 yield 하고, 끝나면 닫는다.
+
+    FastAPI 의 ``Depends`` 에서 사용. 짧은 라이프사이클 (요청당 1회 open/close)
+    은 SQLite 비용이 마이크로초 단위라 무관하다. 병목이면 connection pool 도입.
+
+    PR2 시점엔 라우터가 아직 사용하지 않는다 — PR3 의 Repository 가 첫 사용처.
+
+    Yields:
+        ``open_connection`` 으로 만든 connection (PRAGMA 적용 완료).
+    """
+    settings = get_settings()
+    conn = open_connection(settings.db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 __all__ = [
     "ServerSettings",
+    "get_db",
     "get_session",
     "get_session_store",
     "get_settings",

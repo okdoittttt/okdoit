@@ -20,6 +20,12 @@ from fastapi.staticfiles import StaticFiles
 from server.internal.config import ServerSettings, get_settings
 from server.internal.deps import get_session_store
 from server.internal.routes import register_routes
+from server.internal.storage import (
+    init_db,
+    migrations as storage_migrations,
+    open_connection,
+    schema_sql_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +50,26 @@ def _ensure_screenshot_dir(settings: ServerSettings) -> Path:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-    """앱 라이프사이클 훅. 환경변수 로딩과 종료 정리를 담당한다.
+    """앱 라이프사이클 훅. 환경변수 로딩 + DB 부트스트랩 + 종료 정리를 담당한다.
+
+    DB 부트스트랩은 두 단계:
+        1) ``init_db`` — 파일이 없으면 만들고 초기 스키마 적용 (idempotent).
+        2) ``migrations.apply`` — 누적 변경 적용 (v1 은 빈 리스트라 no-op).
 
     Args:
         app: FastAPI 인스턴스(인자로 받지만 현재 사용하지 않음).
     """
     load_dotenv()
-    logger.info("sidecar 시작")
+    settings = get_settings()
+
+    init_db(settings.db_path, schema_sql_path())
+    conn = open_connection(settings.db_path)
+    try:
+        storage_migrations.apply(conn)
+    finally:
+        conn.close()
+
+    logger.info("sidecar 시작 (data_dir=%s)", settings.data_dir)
     try:
         yield
     finally:
