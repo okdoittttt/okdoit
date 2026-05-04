@@ -16,6 +16,13 @@ appId: kr.datco.okdoit
 productName: okdoit
 copyright: Copyright © 2026 okdoit
 
+# packaged app.asar 안의 package.json 에 productName 을 강제로 넣어
+# Electron 의 ``app.getName()`` 이 ``okdoit`` 을 반환하게 한다 — userData 폴더가
+# OS 표준 위치에서 ``okdoit/`` 로 만들어지도록. 이게 빠지면 ``name`` 필드인
+# ``okdoit-desktop`` 이 fallback 으로 쓰여 userData 경로가 틀어진다.
+extraMetadata:
+  productName: okdoit
+
 directories:
   output: release
   buildResources: build
