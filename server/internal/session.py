@@ -374,6 +374,24 @@ class SqliteSessionStore:
         """
         self._active.pop(session_id, None)
 
+    def delete_persisted(self, session_id: str) -> int:
+        """DB 의 세션 row 를 삭제한다 (cascade 로 events/screenshots/artifacts 도 정리).
+
+        활성 캐시는 건드리지 않는다 — 호출 측이 ``evict`` 를 먼저 호출해야 한다.
+        디스크 스크린샷 디렉토리도 호출 측 책임.
+
+        Args:
+            session_id: 세션 식별자.
+
+        Returns:
+            실제로 삭제된 sessions row 수 (0 또는 1).
+        """
+        conn = self._new_conn()
+        try:
+            return SessionRepository(conn).delete(session_id)
+        finally:
+            conn.close()
+
 
 # 외부 import 호환을 위한 별칭. 새 코드에서는 ``SqliteSessionStore`` 를 직접 쓴다.
 SessionStore = SqliteSessionStore

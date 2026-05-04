@@ -167,6 +167,22 @@ class SessionRepository:
             created_at=row["created_at"],
         )
 
+    def delete(self, session_id: str) -> int:
+        """세션 row 를 삭제한다. ``events`` / ``screenshots`` / ``artifacts`` 자식 row 는
+        ``schema.sql`` 의 ``ON DELETE CASCADE`` 가 자동 정리한다.
+
+        Args:
+            session_id: 세션 식별자. 없는 row 도 조용히 무시(idempotent).
+
+        Returns:
+            실제로 삭제된 row 수 (0 또는 1). 라우트 단의 404 판정에 쓴다.
+        """
+        cur = self._conn.execute(
+            "DELETE FROM sessions WHERE id=?",
+            (session_id,),
+        )
+        return int(cur.rowcount)
+
     def list_all(self, limit: int = _DEFAULT_LIST_LIMIT) -> list[SessionSnapshot]:
         """최근 세션 ``limit`` 개를 created_at 내림차순으로 반환한다.
 
