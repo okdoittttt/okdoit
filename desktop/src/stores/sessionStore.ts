@@ -285,6 +285,11 @@ function newSessionData(sessionId: string, task: string): SessionData {
  * 시각/elapsed 표시에 사용. created_at 이 없거나 파싱 실패 시 fallback 으로
  * 현재 시각.
  */
+/** 세션이 더 이상 라이브 이벤트를 발행하지 않는 터미널 상태인지. */
+function isTerminal(status: SessionStatus): boolean {
+  return status === "finished" || status === "errored" || status === "stopped";
+}
+
 function snapshotToSessionData(snap: SessionSnapshot): SessionData {
   const parsed =
     snap.created_at !== null ? Date.parse(snap.created_at) : Number.NaN;
@@ -359,9 +364,24 @@ export const useSessions = create<SessionsState>((set) => ({
     set((s) => {
       const merged = { ...s.sessions };
       for (const snap of snapshots) {
-        // 이미 메모리에 있는 세션은 라이브 데이터를 보존하기 위해 그대로 둔다.
-        if (snap.id in merged) continue;
-        merged[snap.id] = snapshotToSessionData(snap);
+        const current = merged[snap.id];
+        if (!current) {
+          merged[snap.id] = snapshotToSessionData(snap);
+          continue;
+        }
+        // 이미 메모리에 있는 세션: 라이브 데이터(steps, subtasks 등)는 보존.
+        // 단, 백그라운드에서 종료(FINISHED/ERRORED/STOPPED)된 경우 status 만
+        // patch 한다 — polling 의 핵심 사용자 가치(WS 가 안 붙어 있는 다른
+        // 세션이 끝났을 때 사이드바 뱃지가 stale RUNNING 으로 남는 문제 해결).
+        if (isTerminal(snap.status) && !isTerminal(current.status)) {
+          merged[snap.id] = {
+            ...current,
+            status: snap.status,
+            result: snap.result,
+            error: snap.error,
+            iterations: snap.iterations,
+          };
+        }
       }
       return { sessions: merged };
     }),

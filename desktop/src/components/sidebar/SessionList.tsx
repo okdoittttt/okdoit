@@ -20,6 +20,8 @@ interface Props {
   versionLabel: string;
   onSelect: (id: string | null) => void;
   onNew: () => void;
+  /** 항목 hover 시 휴지통 → 인라인 confirm → Delete 클릭 시 호출. */
+  onDelete?: (sessionId: string) => Promise<void>;
 }
 
 export function SessionList({
@@ -31,6 +33,7 @@ export function SessionList({
   versionLabel,
   onSelect,
   onNew,
+  onDelete,
 }: Props) {
   function handleNewEnter(e: MouseEvent<HTMLButtonElement>): void {
     e.currentTarget.style.background = TOKENS.surface2;
@@ -133,6 +136,7 @@ export function SessionList({
               glow={glow}
               accent={accent}
               onClick={() => onSelect(s.id)}
+              onDelete={onDelete}
             />
           ))
         )}

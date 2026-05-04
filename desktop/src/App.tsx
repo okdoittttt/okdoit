@@ -11,7 +11,7 @@
  * backend 가 ``close_stream`` 하면 자동 disconnect.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TOKENS, type StatusKey } from "@/styles/tokens";
 import { WindowFrame } from "@/components/chrome/WindowFrame";
 import { SessionList } from "@/components/sidebar/SessionList";
@@ -20,7 +20,7 @@ import { CenterPane } from "@/components/center/CenterPane";
 import { ResultPane } from "@/components/result/ResultPane";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { SettingsModal } from "@/components/settings/SettingsModal";
-import { getSessions } from "@/lib/api";
+import { deleteSession, getSessions } from "@/lib/api";
 import {
   useActiveSession,
   useSessionList,
@@ -33,6 +33,11 @@ type ReadyState = "loading" | "first-run" | "ready";
 
 const ACCENT = TOKENS.accent;
 
+// 사이드바 polling 간격(ms). WS 가 안 붙어 있는 다른 세션의 백그라운드 종료를
+// 반영하는 게 목적이라 너무 짧으면 비용만 들고 너무 길면 사용자가 stale RUNNING
+// 뱃지를 오래 본다. 5초가 가성비 1순위 (handoff §8 권고).
+const SESSION_POLL_INTERVAL_MS = 5_000;
+
 
 export default function App() {
   const [readyState, setReadyState] = useState<ReadyState>("loading");
@@ -44,6 +49,7 @@ export default function App() {
   const sessionList = useSessionList();
   const setActive = useSessions((s) => s.setActive);
   const mergeHistorical = useSessions((s) => s.mergeHistorical);
+  const removeSession = useSessions((s) => s.removeSession);
 
   useEffect(() => {
     void window.okdoit.settings.status().then(({ ready }) => {
@@ -72,6 +78,22 @@ export default function App() {
     };
   }, [readyState, mergeHistorical]);
 
+  // 5초마다 /sessions 를 폴링해 백그라운드에서 종료된 세션의 status 를 반영한다.
+  // ``mergeHistorical`` 은 이미 라이브 세션의 steps/subtasks 를 보존하면서
+  // running → terminal 전이만 patch 하도록 만들어져 있어 폴링과 라이브 WS 가
+  // 충돌하지 않는다.
+  useEffect(() => {
+    if (readyState !== "ready") return;
+    const id = window.setInterval(() => {
+      getSessions()
+        .then(mergeHistorical)
+        .catch((err: unknown) => {
+          console.warn("[app] polling /sessions 실패:", err);
+        });
+    }, SESSION_POLL_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [readyState, mergeHistorical]);
+
   // 활성/비활성 무관 — 사용자가 선택한 세션의 step 카드가 비어있으면 WS 에 연결해
   // ``?since_seq=0`` 으로 누락분(과거 세션은 전체) replay 받는다. wsManager.connect
   // 는 idempotent 라 TaskInputBox 가 이미 연 연결을 중복 열지 않는다. 비활성 세션은
@@ -85,6 +107,19 @@ export default function App() {
   const sidebarItems = useMemo<SessionItemData[]>(
     () => sessionList.map(toSidebarItem),
     [sessionList],
+  );
+
+  // SessionItem 의 인라인 confirm "Delete" 클릭 시 호출.
+  // 활성 세션이면 sidecar 가 graceful stop 후 삭제하므로 응답이 최대 ~10초 걸릴
+  // 수 있다. 성공 시 store 에서 제거(active 였다면 ``removeSession`` 이 자동으로
+  // ``activeSessionId`` 를 null 로 만든다) + 혹시 남아있을 수 있는 WS 정리.
+  const handleDelete = useCallback(
+    async (sessionId: string): Promise<void> => {
+      await deleteSession(sessionId);
+      wsManager.disconnect(sessionId);
+      removeSession(sessionId);
+    },
+    [removeSession],
   );
 
   if (readyState === "loading") {
@@ -134,6 +169,7 @@ export default function App() {
           versionLabel="v0.5"
           onSelect={setActive}
           onNew={() => setActive(null)}
+          onDelete={handleDelete}
         />
         <CenterPane
           activeSession={activeSession}

@@ -20,7 +20,8 @@ export type IconName =
   | "check"
   | "x"
   | "cmd"
-  | "reload";
+  | "reload"
+  | "trash";
 
 interface Props {
   name: IconName;
@@ -136,6 +137,15 @@ export function Icon({ name, size = 14, color = "currentColor" }: Props) {
           <path d="M13 3v3h-3" />
           <path d="M13 8a5 5 0 0 1-8.5 3.5L3 10" />
           <path d="M3 13v-3h3" />
+        </svg>
+      );
+    case "trash":
+      return (
+        <svg {...props}>
+          <path d="M3 4.5h10" />
+          <path d="M6 4.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5" />
+          <path d="M4.5 4.5l.6 8.2a1 1 0 0 0 1 .8h3.8a1 1 0 0 0 1-.8l.6-8.2" />
+          <path d="M7 7v4M9 7v4" />
         </svg>
       );
     default:

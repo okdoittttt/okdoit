@@ -82,6 +82,23 @@ export const postResume = (sessionId: string): Promise<void> =>
 export const postStop = (sessionId: string): Promise<void> =>
   postSessionAction(sessionId, "stop");
 
+/**
+ * 세션을 영구 삭제한다 (DB row + 자식 테이블 + 디스크 스크린샷).
+ *
+ * 활성 세션이면 sidecar 가 graceful stop 을 먼저 시도하므로 응답이 최대 ~10초
+ * 걸릴 수 있다. UI 는 spinner 표시 권장.
+ *
+ * @throws Error sidecar 가 4xx / 5xx 응답을 주거나 네트워크 실패 시.
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const url = `${window.okdoit.sidecarUrl}/sessions/${sessionId}`;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`DELETE /sessions/${sessionId} 실패: ${res.status} ${detail}`);
+  }
+}
+
 // ── 세션 목록 ─────────────────────────────────────────────────
 
 /**
