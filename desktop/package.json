@@ -1,7 +1,7 @@
 {
   "name": "okdoit-desktop",
   "productName": "okdoit",
-  "version": "0.1.0",
+  "version": "1.6.0",
   "private": true,
   "description": "okdoit 데스크탑 앱 (Electron + React). Python sidecar 를 spawn 해서 사용자에게 GUI 를 제공한다.",
   "main": "out/main/index.js",
