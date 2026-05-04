@@ -31,6 +31,7 @@ pyinstaller \
     --clean \
     --distpath "${DIST_DIR}" \
     --add-data "prompt:prompt" \
+    --add-data "server/internal/storage/schema.sql:server/internal/storage" \
     --collect-submodules server.internal \
     --collect-all langchain_core \
     --collect-all langgraph \
